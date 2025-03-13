@@ -50,3 +50,10 @@ behaviour of this Github Action:
 - `SKIPPED_USERS`: Some users don't like receiving reviews in Asana. This is a
   comma separated list of github usernames that will be ignored (replaced with
   dax).
+
+
+## Tests
+
+There are limited unit-tests in the `test` directory. As these need relevant API keys set to
+work, they need to be run manually:
+ - Test usermap loading `INPUT_GITHUB_PAT=<token> npx tsx test/test-user-map.ts`

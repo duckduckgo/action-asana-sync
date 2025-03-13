@@ -23,6 +23,9 @@ inputs:
   NO_AUTOCLOSE_PROJECTS:
     required: false
     description: "Comma separated list of project GIDs where we should not automatically close tasks"
+  GITHUB_PAT:
+    required: false
+    description: "Github PAT used for fetching the user map from a private repo."
 outputs:
   task_url:
     description: URL of created/updated PR review task
