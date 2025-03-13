@@ -38,6 +38,8 @@ const SKIPPED_USERS_LIST = SKIPPED_USERS.split(',');
 // Handle list of projects where we don't want to automatically close tasks
 const NO_AUTOCLOSE_PROJECTS = (0, core_1.getInput)('NO_AUTOCLOSE_PROJECTS');
 const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',');
+// Optional behavior flags
+const ASSIGN_PR_AUTHOR = (0, core_1.getInput)('ASSIGN_PR_AUTHOR') === 'true';
 function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
     return __awaiter(this, void 0, void 0, function* () {
         const payload = github_1.context.payload;
@@ -45,9 +47,10 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
         //  const subtasks = await client.tasks.subtasks(taskId)
         const githubAuthor = payload.pull_request.user.login;
         const author = yield (0, user_map_1.getUserFromLogin)(githubAuthor);
-        const reviewerEmail = yield (0, user_map_1.getUserFromLogin)(reviewer);
-        (0, core_1.info)(`Review requested from ${reviewer} (${reviewerEmail})`);
-        if (SKIPPED_USERS_LIST.includes(reviewer) || reviewerEmail === null) {
+        const reviewerGidOrEmail = yield (0, user_map_1.getUserFromLogin)(reviewer);
+        (0, core_1.info)(`Review requested from ${reviewer} (${reviewerGidOrEmail})`);
+        if (SKIPPED_USERS_LIST.includes(reviewer) ||
+            reviewerGidOrEmail === undefined) {
             (0, core_1.info)(`Skipping review subtask creation for ${reviewer} - member of SKIPPED_USERS`);
             return null;
         }
@@ -60,15 +63,16 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
                 continue;
             }
             const asanaUser = yield client.users.findById(subtask.assignee.gid);
-            if (asanaUser.email === reviewerEmail) {
+            if (asanaUser.email === reviewerGidOrEmail ||
+                asanaUser.gid === reviewerGidOrEmail) {
                 (0, core_1.info)(`Found existing review task for ${subtask.gid} and ${asanaUser.email}`);
                 reviewSubtask = subtask;
                 break;
             }
         }
-        (0, core_1.info)(`Subtask for ${reviewerEmail}: ${JSON.stringify(reviewSubtask)}`);
-        const taskFollowers = [reviewerEmail];
-        if (author !== null) {
+        (0, core_1.info)(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`);
+        const taskFollowers = [reviewerGidOrEmail];
+        if (author !== undefined) {
             taskFollowers.push(author);
         }
         const subtaskObj = {
@@ -79,17 +83,17 @@ NOTE:
 * This task will be automatically closed when the review is completed in Github
 
 See parent task for more information`,
-            assignee: reviewerEmail,
+            assignee: reviewerGidOrEmail,
             followers: taskFollowers
         };
         if (!reviewSubtask) {
             (0, core_1.info)(`Author: ${author}`);
-            (0, core_1.info)(`Creating review subtask for ${reviewerEmail}: ${JSON.stringify(subtaskObj)}`);
+            (0, core_1.info)(`Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`);
             (0, core_1.info)(`Creating new subtask can fail when too many subtasks are nested!`);
             reviewSubtask = yield client.tasks.addSubtask(taskId, subtaskObj);
         }
         else {
-            (0, core_1.info)(`Reopening a review subtask for ${reviewerEmail}`);
+            (0, core_1.info)(`Reopening a review subtask for ${reviewer}`);
             // TODO add a comment?
             yield client.tasks.updateTask(reviewSubtask.gid, { completed: false });
         }
@@ -183,7 +187,10 @@ function createPRTask(title, notes, prStatus, customFields) {
             },
             notes,
             name: title,
-            projects: [PROJECT_ID]
+            projects: [PROJECT_ID],
+            assignee: ASSIGN_PR_AUTHOR
+                ? yield (0, user_map_1.getUserFromLogin)(payload.pull_request.user.login)
+                : undefined
         };
         let parentObj = {};
         const asanaTaskMatch = notes.match(/https:\/\/app.asana.*\/([0-9]+).*/);
@@ -500,7 +507,7 @@ function getUserFromLogin(login) {
         if (!EXTERNAL_MAPPING_LOADED) {
             yield loadUserMapFromRepo();
         }
-        return USER_MAP[login] || null;
+        return USER_MAP[login] || undefined;
     });
 }
 exports.getUserFromLogin = getUserFromLogin;

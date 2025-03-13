@@ -26,6 +26,9 @@ inputs:
   GITHUB_PAT:
     required: false
     description: "Github PAT used for fetching the user map from a private repo."
+  ASSIGN_PR_AUTHOR:
+    required: false
+    description: "If 'true', the PR task will be assigned to the Github PR author."
 outputs:
   task_url:
     description: URL of created/updated PR review task
