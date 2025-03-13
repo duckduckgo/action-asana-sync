@@ -51,9 +51,12 @@ async function createOrReopenReviewSubtask(
   //  const subtasks = await client.tasks.subtasks(taskId)
   const githubAuthor = payload.pull_request.user.login
   const author = await getUserFromLogin(githubAuthor)
-  const reviewerEmail = await getUserFromLogin(reviewer)
-  info(`Review requested from ${reviewer} (${reviewerEmail})`)
-  if (SKIPPED_USERS_LIST.includes(reviewer) || reviewerEmail === null) {
+  const reviewerGidOrEmail = await getUserFromLogin(reviewer)
+  info(`Review requested from ${reviewer} (${reviewerGidOrEmail})`)
+  if (
+    SKIPPED_USERS_LIST.includes(reviewer) ||
+    reviewerGidOrEmail === undefined
+  ) {
     info(
       `Skipping review subtask creation for ${reviewer} - member of SKIPPED_USERS`
     )
@@ -69,7 +72,10 @@ async function createOrReopenReviewSubtask(
       continue
     }
     const asanaUser = await client.users.findById(subtask.assignee.gid)
-    if (asanaUser.email === reviewerEmail) {
+    if (
+      asanaUser.email === reviewerGidOrEmail ||
+      asanaUser.gid === reviewerGidOrEmail
+    ) {
       info(
         `Found existing review task for ${subtask.gid} and ${asanaUser.email}`
       )
@@ -77,8 +83,8 @@ async function createOrReopenReviewSubtask(
       break
     }
   }
-  info(`Subtask for ${reviewerEmail}: ${JSON.stringify(reviewSubtask)}`)
-  const taskFollowers = [reviewerEmail]
+  info(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`)
+  const taskFollowers = [reviewerGidOrEmail]
   if (author !== undefined) {
     taskFollowers.push(author)
   }
@@ -92,20 +98,18 @@ NOTE:
 * This task will be automatically closed when the review is completed in Github
 
 See parent task for more information`,
-    assignee: reviewerEmail,
+    assignee: reviewerGidOrEmail,
     followers: taskFollowers
   }
   if (!reviewSubtask) {
     info(`Author: ${author}`)
     info(
-      `Creating review subtask for ${reviewerEmail}: ${JSON.stringify(
-        subtaskObj
-      )}`
+      `Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`
     )
     info(`Creating new subtask can fail when too many subtasks are nested!`)
     reviewSubtask = await client.tasks.addSubtask(taskId, subtaskObj)
   } else {
-    info(`Reopening a review subtask for ${reviewerEmail}`)
+    info(`Reopening a review subtask for ${reviewer}`)
     // TODO add a comment?
     await client.tasks.updateTask(reviewSubtask.gid, {completed: false})
   }
