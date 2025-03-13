@@ -176,8 +176,8 @@ function findPRTask(customFields) {
 }
 function createPRTask(title, notes, prStatus, customFields) {
     return __awaiter(this, void 0, void 0, function* () {
-        (0, core_1.info)('Creating new PR task');
         const payload = github_1.context.payload;
+        (0, core_1.info)(`Creating new PR task for PR from ${payload.pull_request.user.login}`);
         const taskObjBase = {
             workspace: ASANA_WORKSPACE_ID,
             // eslint-disable-next-line camelcase
@@ -192,6 +192,9 @@ function createPRTask(title, notes, prStatus, customFields) {
                 ? yield (0, user_map_1.getUserFromLogin)(payload.pull_request.user.login)
                 : undefined
         };
+        if (taskObjBase.assignee) {
+            (0, core_1.info)(`Task will be assigned to ${taskObjBase.assignee}`);
+        }
         let parentObj = {};
         const asanaTaskMatch = notes.match(/https:\/\/app.asana.*\/([0-9]+).*/);
         if (asanaTaskMatch) {
@@ -215,12 +218,12 @@ function run() {
     var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            (0, core_1.info)(`Event: ${github_1.context.eventName}.`);
+            (0, core_1.debug)(`Event: ${github_1.context.eventName}.`);
             if (!['pull_request', 'pull_request_target', 'pull_request_review'].includes(github_1.context.eventName)) {
                 (0, core_1.info)('Only runs for PR changes and reviews');
                 return;
             }
-            (0, core_1.info)(`Event JSON: \n${JSON.stringify(github_1.context, null, 2)}`);
+            (0, core_1.debug)(`Event JSON: \n${JSON.stringify(github_1.context, null, 2)}`);
             const payload = github_1.context.payload;
             // Skip any action on PRs with this title
             if (payload.pull_request.title.startsWith('Release: ')) {
@@ -236,8 +239,6 @@ function run() {
             const title = `PR ${payload.repository.name} #${payload.pull_request.number}: ${payload.pull_request.title}`;
             const body = payload.pull_request.body || 'Empty description';
             const preamble = `**Note:** This description is automatically updated from Github. **Changes will be LOST**.
-Task is intentionally unassigned. PR authors can assign themselves and add this
-task to additional projects (for example https://app.asana.com/0/11984721910118/1204991209231483)
 
 Code reviews will be created as subtasks and assigned to reviewers.
 
@@ -251,8 +252,6 @@ ${preamble}
 ${truncatedBody}`;
             // Rich-text notes with some custom "fixes" for Asana to render things
             const htmlNotes = `<body>${(0, markdown_1.renderMD)(notes)}</body>`;
-            (0, core_1.info)(`Notes: ${notes}`);
-            (0, core_1.info)(`HTML Notes: ${htmlNotes}`);
             let task;
             if (['opened'].includes(payload.action)) {
                 task = yield createPRTask(title, notes, statusGid, customFields);
@@ -498,6 +497,7 @@ function loadUserMapFromRepo() {
         for (const username in userMap) {
             USER_MAP[username] = userMap[username];
         }
+        (0, core_1.debug)(`Loaded ${Object.keys(userMap).length} usernames from the mapping file.`);
         EXTERNAL_MAPPING_LOADED = true;
         return USER_MAP;
     });

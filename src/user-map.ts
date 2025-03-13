@@ -1,4 +1,4 @@
-import {getInput} from '@actions/core'
+import {debug, getInput} from '@actions/core'
 import {Octokit} from '@octokit/core'
 import yaml from 'js-yaml'
 
@@ -27,10 +27,13 @@ async function loadUserMapFromRepo() {
     }
   )
   // @ts-expect-error Parsing YAML is untyped
-  const userMap: Record<string, string> = yaml.load(response.data)
+  const userMap: {[key: string]: string} = yaml.load(response.data)
   for (const username in userMap) {
     USER_MAP[username] = userMap[username]
   }
+  debug(
+    `Loaded ${Object.keys(userMap).length} usernames from the mapping file.`
+  )
   EXTERNAL_MAPPING_LOADED = true
   return USER_MAP
 }

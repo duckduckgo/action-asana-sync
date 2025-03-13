@@ -210,8 +210,8 @@ async function createPRTask(
   prStatus: string,
   customFields: PRFields
 ): Promise<asana.resources.Tasks.Type> {
-  info('Creating new PR task')
   const payload = context.payload as PullRequestEvent
+  info(`Creating new PR task for PR from ${payload.pull_request.user.login}`)
   const taskObjBase = {
     workspace: ASANA_WORKSPACE_ID,
     // eslint-disable-next-line camelcase
@@ -225,6 +225,9 @@ async function createPRTask(
     assignee: ASSIGN_PR_AUTHOR
       ? await getUserFromLogin(payload.pull_request.user.login)
       : undefined
+  }
+  if (taskObjBase.assignee) {
+    info(`Task will be assigned to ${taskObjBase.assignee}`)
   }
   let parentObj = {}
 
@@ -249,7 +252,7 @@ async function createPRTask(
 
 async function run(): Promise<void> {
   try {
-    info(`Event: ${context.eventName}.`)
+    debug(`Event: ${context.eventName}.`)
     if (
       !['pull_request', 'pull_request_target', 'pull_request_review'].includes(
         context.eventName
@@ -259,7 +262,7 @@ async function run(): Promise<void> {
       return
     }
 
-    info(`Event JSON: \n${JSON.stringify(context, null, 2)}`)
+    debug(`Event JSON: \n${JSON.stringify(context, null, 2)}`)
     const payload = context.payload as PullRequestEvent
     // Skip any action on PRs with this title
     if (payload.pull_request.title.startsWith('Release: ')) {
@@ -281,8 +284,6 @@ async function run(): Promise<void> {
     const body = payload.pull_request.body || 'Empty description'
 
     const preamble = `**Note:** This description is automatically updated from Github. **Changes will be LOST**.
-Task is intentionally unassigned. PR authors can assign themselves and add this
-task to additional projects (for example https://app.asana.com/0/11984721910118/1204991209231483)
 
 Code reviews will be created as subtasks and assigned to reviewers.
 
@@ -301,9 +302,6 @@ ${truncatedBody}`
 
     // Rich-text notes with some custom "fixes" for Asana to render things
     const htmlNotes = `<body>${renderMD(notes)}</body>`
-
-    info(`Notes: ${notes}`)
-    info(`HTML Notes: ${htmlNotes}`)
 
     let task
     if (['opened'].includes(payload.action)) {
