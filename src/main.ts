@@ -230,9 +230,7 @@ async function createPRTask(
   }
   let parentObj = {}
 
-  const asanaTaskMatch = notes.match(
-    /Asana:.*https:\/\/app.asana.*\/([0-9]+).*/
-  )
+  const asanaTaskMatch = notes.match(/https:\/\/app.asana.*\/([0-9]+).*/)
   if (asanaTaskMatch) {
     info(`Found Asana task mention with parent ID: ${asanaTaskMatch[1]}`)
     const parentID = asanaTaskMatch[1]
