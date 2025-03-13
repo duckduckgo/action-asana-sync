@@ -38,6 +38,9 @@ const SKIPPED_USERS_LIST = SKIPPED_USERS.split(',')
 const NO_AUTOCLOSE_PROJECTS = getInput('NO_AUTOCLOSE_PROJECTS')
 const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',')
 
+// Optional behavior flags
+const ASSIGN_PR_AUTHOR = getInput('ASSIGN_PR_AUTHOR') === 'true'
+
 async function createOrReopenReviewSubtask(
   taskId: string,
   reviewer: string,
@@ -76,7 +79,7 @@ async function createOrReopenReviewSubtask(
   }
   info(`Subtask for ${reviewerEmail}: ${JSON.stringify(reviewSubtask)}`)
   const taskFollowers = [reviewerEmail]
-  if (author !== null) {
+  if (author !== undefined) {
     taskFollowers.push(author)
   }
   const subtaskObj = {
@@ -214,7 +217,10 @@ async function createPRTask(
     },
     notes,
     name: title,
-    projects: [PROJECT_ID]
+    projects: [PROJECT_ID],
+    assignee: ASSIGN_PR_AUTHOR
+      ? await getUserFromLogin(payload.pull_request.user.login)
+      : undefined
   }
   let parentObj = {}
 

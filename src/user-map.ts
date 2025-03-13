@@ -35,9 +35,9 @@ async function loadUserMapFromRepo() {
   return USER_MAP
 }
 
-export async function getUserFromLogin(login: string): Promise<string | null> {
+export async function getUserFromLogin(login: string) {
   if (!EXTERNAL_MAPPING_LOADED) {
     await loadUserMapFromRepo()
   }
-  return USER_MAP[login] || null
+  return USER_MAP[login] || undefined
 }
