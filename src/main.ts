@@ -9,15 +9,12 @@ import {
 } from '@octokit/webhooks-types'
 
 import {renderMD} from './markdown'
+import {getUserFromLogin} from './user-map'
 
 const CUSTOM_FIELD_NAMES = {
   url: 'Github URL',
   status: 'Github Status'
 }
-
-const MAIL_MAP: {[key: string]: string} = JSON.parse(
-  getInput('USER_MAP', {required: false}) || '{}'
-)
 
 type PRState = 'Open' | 'Closed' | 'Merged' | 'Approved' | 'Draft'
 
@@ -41,15 +38,6 @@ const SKIPPED_USERS_LIST = SKIPPED_USERS.split(',')
 const NO_AUTOCLOSE_PROJECTS = getInput('NO_AUTOCLOSE_PROJECTS')
 const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',')
 
-function getUserFromLogin(login: string): string | null {
-  const mail = MAIL_MAP[login]
-  if (mail === undefined) {
-    // Ignore unknown
-    return null
-  }
-  return `${mail}@duckduckgo.com`
-}
-
 async function createOrReopenReviewSubtask(
   taskId: string,
   reviewer: string,
@@ -59,8 +47,8 @@ async function createOrReopenReviewSubtask(
   const title = payload.pull_request.title
   //  const subtasks = await client.tasks.subtasks(taskId)
   const githubAuthor = payload.pull_request.user.login
-  const author = getUserFromLogin(githubAuthor)
-  const reviewerEmail = getUserFromLogin(reviewer)
+  const author = await getUserFromLogin(githubAuthor)
+  const reviewerEmail = await getUserFromLogin(reviewer)
   info(`Review requested from ${reviewer} (${reviewerEmail})`)
   if (SKIPPED_USERS_LIST.includes(reviewer) || reviewerEmail === null) {
     info(
