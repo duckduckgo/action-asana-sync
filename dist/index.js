@@ -77,7 +77,8 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
         }
         const subtaskObj = {
             name: `Review Request: ${title}`,
-            notes: `${author || githubAuthor} requested your code review of ${payload.pull_request.html_url}.
+            // eslint-disable-next-line camelcase
+            html_notes: `<a data-asana-gid="${reviewerGidOrEmail}" /> requested your code review of ${payload.pull_request.html_url}.
 
 NOTE:
 * This task will be automatically closed when the review is completed in Github
