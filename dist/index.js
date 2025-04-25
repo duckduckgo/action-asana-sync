@@ -197,7 +197,7 @@ function createPRTask(title, notes, prStatus, customFields) {
             (0, core_1.info)(`Task will be assigned to ${taskObjBase.assignee}`);
         }
         let parentObj = {};
-        const asanaTaskMatch = notes.match(/https:\/\/app.asana.*\/([0-9]+).*/);
+        const asanaTaskMatch = notes.match(/[ *:]https:\/\/app.asana.*\/([0-9]+)/);
         if (asanaTaskMatch) {
             (0, core_1.info)(`Found Asana task mention with parent ID: ${asanaTaskMatch[1]}`);
             const parentID = asanaTaskMatch[1];
