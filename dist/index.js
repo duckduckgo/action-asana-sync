@@ -259,7 +259,7 @@ ${truncatedBody}`;
                 (0, core_1.setOutput)('result', 'created');
             }
             else {
-                const maxRetries = 5;
+                const maxRetries = 3 + Math.floor(Math.random() * 5); // 3-8 retries
                 let retries = 0;
                 while (retries < maxRetries) {
                     // Wait for PR to appear
@@ -269,7 +269,7 @@ ${truncatedBody}`;
                         break;
                     }
                     (0, core_1.info)(`PR task not found yet. Sleeping...`);
-                    yield new Promise(resolve => setTimeout(resolve, 20000));
+                    yield new Promise(resolve => setTimeout(resolve, 20000 + Math.floor(Math.random() * 10000))); // 20-30s wait time
                     retries++;
                 }
                 if (!task) {
