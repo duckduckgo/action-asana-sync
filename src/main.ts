@@ -307,7 +307,7 @@ ${truncatedBody}`
       task = await createPRTask(title, notes, statusGid, customFields)
       setOutput('result', 'created')
     } else {
-      const maxRetries = 5
+      const maxRetries = 3 + Math.floor(Math.random() * 5) // 3-8 retries
       let retries = 0
 
       while (retries < maxRetries) {
@@ -318,7 +318,9 @@ ${truncatedBody}`
           break
         }
         info(`PR task not found yet. Sleeping...`)
-        await new Promise(resolve => setTimeout(resolve, 20000))
+        await new Promise(resolve =>
+          setTimeout(resolve, 20000 + Math.floor(Math.random() * 10000))
+        ) // 20-30s wait time
         retries++
       }
 
