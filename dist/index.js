@@ -16,6 +16,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createOrReopenReviewSubtask = exports.client = void 0;
 const asana_1 = __nccwpck_require__(43565);
 const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
@@ -25,7 +26,7 @@ const CUSTOM_FIELD_NAMES = {
     url: 'Github URL',
     status: 'Github Status'
 };
-const client = asana_1.Client.create({
+exports.client = asana_1.Client.create({
     defaultHeaders: {
         'asana-enable': 'new_user_task_lists,new_project_templates,new_goal_memberships'
     }
@@ -46,7 +47,7 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
         const title = payload.pull_request.title;
         //  const subtasks = await client.tasks.subtasks(taskId)
         const githubAuthor = payload.pull_request.user.login;
-        const author = yield (0, user_map_1.getUserFromLogin)(githubAuthor);
+        const author = (yield (0, user_map_1.getUserFromLogin)(githubAuthor)) || githubAuthor;
         const reviewerGidOrEmail = yield (0, user_map_1.getUserFromLogin)(reviewer);
         (0, core_1.info)(`Review requested from ${reviewer} (${reviewerGidOrEmail})`);
         if (SKIPPED_USERS_LIST.includes(reviewer) ||
@@ -57,12 +58,12 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
         let reviewSubtask;
         for (let subtask of subtasks.data) {
             (0, core_1.info)(`Checking subtask ${subtask.gid} assignee`);
-            subtask = yield client.tasks.findById(subtask.gid);
+            subtask = yield exports.client.tasks.findById(subtask.gid);
             if (!subtask.assignee) {
                 (0, core_1.info)(`Task ${subtask.gid} has no assignee`);
                 continue;
             }
-            const asanaUser = yield client.users.findById(subtask.assignee.gid);
+            const asanaUser = yield exports.client.users.findById(subtask.assignee.gid);
             if (asanaUser.email === reviewerGidOrEmail ||
                 asanaUser.gid === reviewerGidOrEmail) {
                 (0, core_1.info)(`Found existing review task for ${subtask.gid} and ${asanaUser.email}`);
@@ -72,18 +73,22 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
         }
         (0, core_1.info)(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`);
         const taskFollowers = [reviewerGidOrEmail];
-        if (author !== undefined) {
+        if (author !== undefined &&
+            (/^[0-9]+$/.exec(author) !== null || author.includes('@'))) {
             taskFollowers.push(author);
         }
+        const requesterName = /^[0-9]+$/.exec(author || '') !== null
+            ? `<a data-asana-gid="${author}" />`
+            : author;
         const subtaskObj = {
             name: `Review Request: ${title}`,
             // eslint-disable-next-line camelcase
-            html_notes: `<a data-asana-gid="${reviewerGidOrEmail}" /> requested your code review of ${payload.pull_request.html_url}.
+            html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
 * This task will be automatically closed when the review is completed in Github
 
-See parent task for more information`,
+See parent task for more information</body>`,
             assignee: reviewerGidOrEmail,
             followers: taskFollowers
         };
@@ -91,21 +96,22 @@ See parent task for more information`,
             (0, core_1.info)(`Author: ${author}`);
             (0, core_1.info)(`Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`);
             (0, core_1.info)(`Creating new subtask can fail when too many subtasks are nested!`);
-            reviewSubtask = yield client.tasks.addSubtask(taskId, subtaskObj);
+            reviewSubtask = yield exports.client.tasks.addSubtask(taskId, subtaskObj);
         }
         else {
             (0, core_1.info)(`Reopening a review subtask for ${reviewer}`);
             // TODO add a comment?
-            yield client.tasks.updateTask(reviewSubtask.gid, { completed: false });
+            yield exports.client.tasks.updateTask(reviewSubtask.gid, { completed: false });
         }
         return reviewSubtask;
     });
 }
+exports.createOrReopenReviewSubtask = createOrReopenReviewSubtask;
 function updateReviewSubTasks(taskId) {
     return __awaiter(this, void 0, void 0, function* () {
         (0, core_1.info)(`Creating/updating review subtasks for task ${taskId}`);
         const payload = github_1.context.payload;
-        const subtasks = yield client.tasks.subtasks(taskId);
+        const subtasks = yield exports.client.tasks.subtasks(taskId);
         if (github_1.context.eventName === 'pull_request' ||
             github_1.context.eventName === 'pull_request_target') {
             if (payload.action === 'review_requested') {
@@ -125,7 +131,7 @@ function updateReviewSubTasks(taskId) {
                 const subtask = yield createOrReopenReviewSubtask(taskId, reviewer.login, subtasks);
                 if (subtask !== null) {
                     (0, core_1.info)(`Completing review subtask for ${reviewer.login}: ${subtask.gid}`);
-                    yield client.tasks.updateTask(subtask.gid, { completed: true });
+                    yield exports.client.tasks.updateTask(subtask.gid, { completed: true });
                 }
             }
         }
@@ -133,9 +139,9 @@ function updateReviewSubTasks(taskId) {
 }
 function closeSubtasks(taskId) {
     return __awaiter(this, void 0, void 0, function* () {
-        const subtasks = yield client.tasks.subtasks(taskId);
+        const subtasks = yield exports.client.tasks.subtasks(taskId);
         for (const subtask of subtasks.data) {
-            yield client.tasks.updateTask(subtask.gid, { completed: true });
+            yield exports.client.tasks.updateTask(subtask.gid, { completed: true });
         }
     });
 }
@@ -144,7 +150,7 @@ function findPRTask(customFields) {
         // Let's first try to seaech using PR URL
         const payload = github_1.context.payload;
         const prURL = payload.pull_request.html_url;
-        const prTasks = yield client.tasks.searchInWorkspace(ASANA_WORKSPACE_ID, {
+        const prTasks = yield exports.client.tasks.searchInWorkspace(ASANA_WORKSPACE_ID, {
             [`custom_fields.${customFields.url.gid}.value`]: prURL
         });
         if (prTasks.data.length > 0) {
@@ -155,7 +161,7 @@ function findPRTask(customFields) {
             // searchInWorkspace can fail for recently created Asana tasks. Let's look
             // at 100 most recent tasks in destination project
             // https://developers.asana.com/reference/searchtasksforworkspace#eventual-consistency
-            const projectTasks = yield client.tasks.findByProject(PROJECT_ID, {
+            const projectTasks = yield exports.client.tasks.findByProject(PROJECT_ID, {
                 // eslint-disable-next-line camelcase
                 opt_fields: 'custom_fields',
                 limit: 100
@@ -204,7 +210,7 @@ function createPRTask(title, notes, prStatus, customFields) {
             parentObj = { parent: parentID };
             // Verify we can access parent or we can't add it
             try {
-                yield client.tasks.findById(parentID);
+                yield exports.client.tasks.findById(parentID);
             }
             catch (e) {
                 (0, core_1.info)(`Can't access parent task: ${parentID}: ${e}`);
@@ -212,7 +218,7 @@ function createPRTask(title, notes, prStatus, customFields) {
                 parentObj = {};
             }
         }
-        return client.tasks.create(Object.assign(Object.assign({}, taskObjBase), parentObj));
+        return exports.client.tasks.create(Object.assign(Object.assign({}, taskObjBase), parentObj));
     });
 }
 function run() {
@@ -281,7 +287,7 @@ ${truncatedBody}`;
             (0, core_1.setOutput)('task_url', task.permalink_url);
             const sectionId = (0, core_1.getInput)('move_to_section_id');
             if (sectionId) {
-                yield client.sections.addTask(sectionId, { task: task.gid });
+                yield exports.client.sections.addTask(sectionId, { task: task.gid });
             }
             const taskId = task.gid;
             // Whether we want to close the PR task
@@ -294,7 +300,7 @@ ${truncatedBody}`;
                 // Unless the task is in specific projects automatically close
                 closeTask = true;
                 (0, core_1.info)(`Considering whether to close PR task itself...`);
-                const fullTask = yield client.tasks.findById(taskId);
+                const fullTask = yield exports.client.tasks.findById(taskId);
                 for (const membership of fullTask.memberships) {
                     if (NO_AUTOCLOSE_LIST.includes(membership.project.gid)) {
                         (0, core_1.info)(`Tasks is in one of NO_AUTOCLOSE_PROJECTS. Not closing`);
@@ -307,7 +313,7 @@ ${truncatedBody}`;
             }
             try {
                 // Try using html notes first and fall back to unformatted if this fails
-                yield client.tasks.updateTask(taskId, {
+                yield exports.client.tasks.updateTask(taskId, {
                     name: title,
                     // eslint-disable-next-line camelcase
                     html_notes: htmlNotes,
@@ -320,7 +326,7 @@ ${truncatedBody}`;
             }
             catch (err) {
                 (0, core_1.info)(`Updating task with HTML notes failed. Retrying with plaintext`);
-                yield client.tasks.updateTask(taskId, {
+                yield exports.client.tasks.updateTask(taskId, {
                     name: title,
                     notes,
                     completed: closeTask,
@@ -339,7 +345,7 @@ ${truncatedBody}`;
 }
 function findCustomFields(workspaceGid) {
     return __awaiter(this, void 0, void 0, function* () {
-        const apiResponse = yield client.customFields.getCustomFieldsForWorkspace(workspaceGid);
+        const apiResponse = yield exports.client.customFields.getCustomFieldsForWorkspace(workspaceGid);
         // pull all fields from the API with the streaming
         const stream = apiResponse.stream();
         const customFields = [];

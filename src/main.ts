@@ -22,7 +22,7 @@ type PRFields = {
   url: asana.resources.CustomField
   status: asana.resources.CustomField
 }
-const client = Client.create({
+export const client = Client.create({
   defaultHeaders: {
     'asana-enable':
       'new_user_task_lists,new_project_templates,new_goal_memberships'
@@ -41,7 +41,7 @@ const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',')
 // Optional behavior flags
 const ASSIGN_PR_AUTHOR = getInput('ASSIGN_PR_AUTHOR') === 'true'
 
-async function createOrReopenReviewSubtask(
+export async function createOrReopenReviewSubtask(
   taskId: string,
   reviewer: string,
   subtasks: asana.resources.ResourceList<asana.resources.Tasks.Type>
@@ -50,7 +50,7 @@ async function createOrReopenReviewSubtask(
   const title = payload.pull_request.title
   //  const subtasks = await client.tasks.subtasks(taskId)
   const githubAuthor = payload.pull_request.user.login
-  const author = await getUserFromLogin(githubAuthor)
+  const author = (await getUserFromLogin(githubAuthor)) || githubAuthor
   const reviewerGidOrEmail = await getUserFromLogin(reviewer)
   info(`Review requested from ${reviewer} (${reviewerGidOrEmail})`)
   if (
@@ -85,18 +85,25 @@ async function createOrReopenReviewSubtask(
   }
   info(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`)
   const taskFollowers = [reviewerGidOrEmail]
-  if (author !== undefined) {
+  if (
+    author !== undefined &&
+    (/^[0-9]+$/.exec(author) !== null || author.includes('@'))
+  ) {
     taskFollowers.push(author)
   }
+  const requesterName =
+    /^[0-9]+$/.exec(author || '') !== null
+      ? `<a data-asana-gid="${author}" />`
+      : author
   const subtaskObj = {
     name: `Review Request: ${title}`,
     // eslint-disable-next-line camelcase
-    html_notes: `<a data-asana-gid="${reviewerGidOrEmail}" /> requested your code review of ${payload.pull_request.html_url}.
+    html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
 * This task will be automatically closed when the review is completed in Github
 
-See parent task for more information`,
+See parent task for more information</body>`,
     assignee: reviewerGidOrEmail,
     followers: taskFollowers
   }
