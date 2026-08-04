@@ -21,6 +21,7 @@ const asana_1 = __nccwpck_require__(43565);
 const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
 const markdown_1 = __nccwpck_require__(15821);
+const reviewers_1 = __nccwpck_require__(40512);
 const user_map_1 = __nccwpck_require__(21757);
 const CUSTOM_FIELD_NAMES = {
     url: 'Github URL',
@@ -41,7 +42,9 @@ const NO_AUTOCLOSE_PROJECTS = (0, core_1.getInput)('NO_AUTOCLOSE_PROJECTS');
 const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',');
 // Optional behavior flags
 const ASSIGN_PR_AUTHOR = (0, core_1.getInput)('ASSIGN_PR_AUTHOR') === 'true';
-function createOrReopenReviewSubtask(taskId, reviewer, subtasks) {
+// Create review subtasks for assignees as well as for requested reviewers
+const INCLUDE_ASSIGNEES = (0, core_1.getInput)('INCLUDE_ASSIGNEES') === 'true';
+function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfCompleted = true) {
     return __awaiter(this, void 0, void 0, function* () {
         const payload = github_1.context.payload;
         const title = payload.pull_request.title;
@@ -98,10 +101,16 @@ See parent task for more information</body>`,
             (0, core_1.info)(`Creating new subtask can fail when too many subtasks are nested!`);
             reviewSubtask = yield exports.client.tasks.addSubtask(taskId, subtaskObj);
         }
-        else {
+        else if (!reviewSubtask.completed) {
+            (0, core_1.info)(`Review subtask for ${reviewer} is already open`);
+        }
+        else if (reopenIfCompleted) {
             (0, core_1.info)(`Reopening a review subtask for ${reviewer}`);
             // TODO add a comment?
             yield exports.client.tasks.updateTask(reviewSubtask.gid, { completed: false });
+        }
+        else {
+            (0, core_1.info)(`Leaving the completed review subtask for ${reviewer} as it is`);
         }
         return reviewSubtask;
     });
@@ -114,12 +123,25 @@ function updateReviewSubTasks(taskId) {
         const subtasks = yield exports.client.tasks.subtasks(taskId);
         if (github_1.context.eventName === 'pull_request' ||
             github_1.context.eventName === 'pull_request_target') {
+            // The reviewer named by a review_requested event is the only one whose
+            // completed task may be reopened: a review has just been asked for again.
+            // Everyone else keeps the verdict they already gave, so that a later push
+            // does not reopen a review that has been given.
+            let requestedReviewer;
             if (payload.action === 'review_requested') {
                 const requestPayload = payload;
                 // TODO handle teams?
                 if ('requested_reviewer' in requestPayload) {
-                    createOrReopenReviewSubtask(taskId, requestPayload.requested_reviewer.login, subtasks);
+                    requestedReviewer = requestPayload.requested_reviewer.login;
                 }
+            }
+            if (INCLUDE_ASSIGNEES) {
+                for (const reviewer of (0, reviewers_1.getReviewerLogins)(payload.pull_request)) {
+                    yield createOrReopenReviewSubtask(taskId, reviewer, subtasks, reviewer === requestedReviewer);
+                }
+            }
+            else if (requestedReviewer) {
+                yield createOrReopenReviewSubtask(taskId, requestedReviewer, subtasks);
             }
         }
         else if (github_1.context.eventName === 'pull_request_review') {
@@ -454,6 +476,35 @@ function renderMD(text) {
         .replace(/(<li>.*)\n/gm, '$1');
 }
 exports.renderMD = renderMD;
+
+
+/***/ }),
+
+/***/ 40512:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getReviewerLogins = void 0;
+/**
+ * Logins that should get a review subtask: the union of the PR's assignees and
+ * its requested reviewers, minus the author (a self-assigned PR is not a review
+ * request). Requested teams are skipped, as they have no login to look up in
+ * USER_MAP.
+ *
+ * This is derived from the PR's current state rather than from the triggering
+ * event, so reviewers requested in the same burst all get a task even if
+ * Github's concurrency queue dropped some of the webhooks.
+ */
+function getReviewerLogins(pr) {
+    const logins = [
+        ...pr.assignees.map(assignee => assignee.login),
+        ...pr.requested_reviewers.flatMap(reviewer => 'login' in reviewer ? [reviewer.login] : [])
+    ];
+    return [...new Set(logins)].filter(login => login !== pr.user.login);
+}
+exports.getReviewerLogins = getReviewerLogins;
 
 
 /***/ }),

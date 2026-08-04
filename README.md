@@ -50,6 +50,12 @@ behaviour of this Github Action:
 - `SKIPPED_USERS`: Some users don't like receiving reviews in Asana. This is a
   comma separated list of github usernames that will be ignored (replaced with
   dax).
+- `INCLUDE_ASSIGNEES`: By default a review subtask is only created for users
+  added to the PR's *Reviewers*. Set this to `'true'` to create one for the
+  union of *Reviewers* and *Assignees* instead, minus the PR author. Useful for
+  teams that drive code review from the Assignees field. Note that with this
+  enabled the reviewer set is read from the PR's current state on every event
+  rather than from the triggering webhook.
 
 
 ## Tests
@@ -57,3 +63,4 @@ behaviour of this Github Action:
 There are limited unit-tests in the `test` directory. As these need relevant API keys set to
 work, they need to be run manually:
  - Test usermap loading `INPUT_GITHUB_PAT=<token> npx tsx test/test-user-map.ts`
+ - Test reviewer set computation `npx tsx test/reviewers.test.ts`
