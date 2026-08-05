@@ -60,7 +60,21 @@ behaviour of this Github Action:
 
 ## Tests
 
-There are limited unit-tests in the `test` directory. As these need relevant API keys set to
-work, they need to be run manually:
- - Test usermap loading `INPUT_GITHUB_PAT=<token> npx tsx test/test-user-map.ts`
- - Test reviewer set computation `npx tsx test/reviewers.test.ts`
+Run the whole suite with `npm test`. It's split into two Jest projects:
+
+- **unit** (`test/*.test.ts`): small, focused tests, e.g. `user-map.test.ts`
+  covers `getUserFromLogin` against a mocked Github API (via undici's
+  `MockAgent`, since Octokit talks fetch rather than plain `http`), and
+  `reviewers.test.ts` covers `getReviewerLogins`'s pure set logic.
+- **integration** (`test/integration/**`): drives the real action entrypoint
+  (`src/main.ts`) end-to-end for each Github event it handles (PR opened,
+  updated, closed/merged, review requested, review approved), against a
+  mocked Asana API. Mocking is done with `nock` at the HTTP boundary
+  (`https://app.asana.com`), so the real `asana` client's request/response
+  handling is exercised, not a hand-rolled stub of it. See
+  `test/integration/helpers/harness.ts` and
+  `test/integration/helpers/mock-asana.ts`.
+
+Run just one project with `npm run test:unit` or `npm run test:integration`.
+
+No live API keys are needed to run any of these tests.

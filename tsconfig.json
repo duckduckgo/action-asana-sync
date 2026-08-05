@@ -9,5 +9,5 @@
     "esModuleInterop": true,                  /* Enables emit interoperability between CommonJS and ES Modules via creation of namespace objects for all imports. Implies 'allowSyntheticDefaultImports'. */
     "newLine": "lf"                           /* Force LF so dist/ built on Windows matches the Linux CI build (check-dist compares bytes). */
   },
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "exclude": ["node_modules", "test"]
 }
