@@ -1,0 +1,19 @@
+[
+  {
+    "gid": "111",
+    "name": "Github URL",
+    "resource_type": "custom_field"
+  },
+  {
+    "gid": "222",
+    "name": "Github Status",
+    "resource_type": "custom_field",
+    "enum_options": [
+      {"gid": "222-1", "name": "Open"},
+      {"gid": "222-2", "name": "Closed"},
+      {"gid": "222-3", "name": "Merged"},
+      {"gid": "222-4", "name": "Approved"},
+      {"gid": "222-5", "name": "Draft"}
+    ]
+  }
+]

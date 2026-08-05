@@ -1,0 +1,18 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 42,
+    "title": "Add sprinkles to the frontend",
+    "html_url": "https://github.com/duckduckgo/action-asana-sync/pull/42",
+    "body": "This PR adds sprinkles.\n\nSee also https://app.asana.com/0/1234567890/9876543210",
+    "state": "open",
+    "draft": false,
+    "merged": false,
+    "user": {
+      "login": "octocat"
+    }
+  },
+  "repository": {
+    "name": "action-asana-sync"
+  }
+}

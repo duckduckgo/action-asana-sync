@@ -465,4 +465,4 @@ function getPRState(pr: PullRequest): PRState {
   return 'Closed'
 }
 
-run()
+export const done = run()
