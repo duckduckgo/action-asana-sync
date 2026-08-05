@@ -29,6 +29,9 @@ inputs:
   ASSIGN_PR_AUTHOR:
     required: false
     description: "If 'true', the PR task will be assigned to the Github PR author."
+  INCLUDE_ASSIGNEES:
+    required: false
+    description: "If 'true', review subtasks are created for the union of the PR's assignees and its requested reviewers, instead of for requested reviewers only."
 outputs:
   task_url:
     description: URL of created/updated PR review task

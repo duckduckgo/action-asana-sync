@@ -9,6 +9,7 @@ import {
 } from '@octokit/webhooks-types'
 
 import {renderMD} from './markdown'
+import {getReviewerLogins} from './reviewers'
 import {getUserFromLogin} from './user-map'
 
 const CUSTOM_FIELD_NAMES = {
@@ -40,11 +41,14 @@ const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',')
 
 // Optional behavior flags
 const ASSIGN_PR_AUTHOR = getInput('ASSIGN_PR_AUTHOR') === 'true'
+// Create review subtasks for assignees as well as for requested reviewers
+const INCLUDE_ASSIGNEES = getInput('INCLUDE_ASSIGNEES') === 'true'
 
 export async function createOrReopenReviewSubtask(
   taskId: string,
   reviewer: string,
-  subtasks: asana.resources.ResourceList<asana.resources.Tasks.Type>
+  subtasks: asana.resources.ResourceList<asana.resources.Tasks.Type>,
+  reopenIfCompleted = true
 ): Promise<asana.resources.Tasks.Type | null> {
   const payload = context.payload as PullRequestEvent
   const title = payload.pull_request.title
@@ -114,10 +118,14 @@ See parent task for more information</body>`,
     )
     info(`Creating new subtask can fail when too many subtasks are nested!`)
     reviewSubtask = await client.tasks.addSubtask(taskId, subtaskObj)
-  } else {
+  } else if (!reviewSubtask.completed) {
+    info(`Review subtask for ${reviewer} is already open`)
+  } else if (reopenIfCompleted) {
     info(`Reopening a review subtask for ${reviewer}`)
     // TODO add a comment?
     await client.tasks.updateTask(reviewSubtask.gid, {completed: false})
+  } else {
+    info(`Leaving the completed review subtask for ${reviewer} as it is`)
   }
   return reviewSubtask
 }
@@ -130,16 +138,30 @@ async function updateReviewSubTasks(taskId: string): Promise<void> {
     context.eventName === 'pull_request' ||
     context.eventName === 'pull_request_target'
   ) {
+    // The reviewer named by a review_requested event is the only one whose
+    // completed task may be reopened: a review has just been asked for again.
+    // Everyone else keeps the verdict they already gave, so that a later push
+    // does not reopen a review that has been given.
+    let requestedReviewer: string | undefined
     if (payload.action === 'review_requested') {
       const requestPayload = payload as PullRequestReviewRequestedEvent
       // TODO handle teams?
       if ('requested_reviewer' in requestPayload) {
-        createOrReopenReviewSubtask(
+        requestedReviewer = requestPayload.requested_reviewer.login
+      }
+    }
+
+    if (INCLUDE_ASSIGNEES) {
+      for (const reviewer of getReviewerLogins(payload.pull_request)) {
+        await createOrReopenReviewSubtask(
           taskId,
-          requestPayload.requested_reviewer.login,
-          subtasks
+          reviewer,
+          subtasks,
+          reviewer === requestedReviewer
         )
       }
+    } else if (requestedReviewer) {
+      await createOrReopenReviewSubtask(taskId, requestedReviewer, subtasks)
     }
   } else if (context.eventName === 'pull_request_review') {
     const reviewPayload = context.payload as PullRequestReviewEvent
