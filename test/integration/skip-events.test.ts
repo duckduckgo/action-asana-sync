@@ -1,14 +1,7 @@
-import fs from 'fs'
-import path from 'path'
-import {runAction} from './helpers/harness'
+import {runAction, loadFixture} from './helpers/harness'
 import './setup'
 
-const OPENED_EVENT = JSON.parse(
-  fs.readFileSync(
-    path.join(__dirname, 'fixtures/events/pull_request.opened.json'),
-    'utf8'
-  )
-)
+const OPENED_EVENT = loadFixture('fixtures/events/pull_request.opened.json')
 
 describe('events the action ignores', () => {
   it('does nothing for non-PR events', async () => {

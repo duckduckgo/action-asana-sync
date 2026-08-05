@@ -2,10 +2,6 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-// Env vars that the harness itself manages across runs, beyond the
-// per-test INPUT_* values callers pass in.
-const MANAGED_ENV_KEYS = ['GITHUB_EVENT_NAME', 'GITHUB_EVENT_PATH']
-
 const DEFAULT_INPUTS: Record<string, string> = {
   ASANA_ACCESS_TOKEN: 'test-asana-token',
   ASANA_WORKSPACE_ID: '1000',
@@ -20,13 +16,19 @@ function inputEnvName(name: string): string {
   return `INPUT_${name.replace(/ /g, '_').toUpperCase()}`
 }
 
-let tmpDir: string | undefined
+// Reused across every runAction() call in a test file instead of a fresh
+// mkdtemp per call: only the file's contents change between calls.
+let eventFile: string | undefined
 
 function writeEventFixture(payload: unknown): string {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asana-sync-'))
-  const file = path.join(tmpDir, 'event.json')
-  fs.writeFileSync(file, JSON.stringify(payload))
-  return file
+  if (!eventFile) {
+    eventFile = path.join(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'asana-sync-')),
+      'event.json'
+    )
+  }
+  fs.writeFileSync(eventFile, JSON.stringify(payload))
+  return eventFile
 }
 
 export interface RunActionOptions {
@@ -58,9 +60,8 @@ export async function runAction(
 ): Promise<RunActionResult> {
   jest.resetModules()
 
-  const eventPath = writeEventFixture(options.payload)
   process.env.GITHUB_EVENT_NAME = options.eventName
-  process.env.GITHUB_EVENT_PATH = eventPath
+  process.env.GITHUB_EVENT_PATH = writeEventFixture(options.payload)
 
   const inputs = {...DEFAULT_INPUTS, ...options.inputs}
   for (const [key, value] of Object.entries(inputs)) {
@@ -81,12 +82,22 @@ export async function runAction(
   return {core, setOutput, setFailed}
 }
 
+/** Removes the shared event-fixture temp dir. Call once, e.g. from afterAll(). */
 export function cleanupFixtures(): void {
-  if (tmpDir && fs.existsSync(tmpDir)) {
-    fs.rmSync(tmpDir, {recursive: true, force: true})
-    tmpDir = undefined
+  if (eventFile) {
+    fs.rmSync(path.dirname(eventFile), {recursive: true, force: true})
+    eventFile = undefined
   }
-  for (const key of MANAGED_ENV_KEYS) {
-    delete process.env[key]
-  }
+}
+
+/**
+ * Reads and parses a JSON fixture, given a path relative to test/integration/.
+ * Returns `any`, matching JSON.parse(), since these are loosely-typed fixtures
+ * callers spread, index into, and mutate freely.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function loadFixture<T = any>(relativePath: string): T {
+  return JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', relativePath), 'utf8')
+  )
 }

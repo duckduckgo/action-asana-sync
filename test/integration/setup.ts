@@ -12,7 +12,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  cleanupFixtures()
   nock.cleanAll()
   jest.restoreAllMocks()
   // setFailed() sets process.exitCode; a test exercising the failure path
@@ -22,4 +21,5 @@ afterEach(() => {
 
 afterAll(() => {
   nock.enableNetConnect()
+  cleanupFixtures()
 })

@@ -1,6 +1,4 @@
-import fs from 'fs'
-import path from 'path'
-import {runAction} from './helpers/harness'
+import {runAction, loadFixture} from './helpers/harness'
 import {
   mockCustomFields,
   mockCreateTask,
@@ -13,18 +11,8 @@ import {
 import {makeTask} from './fixtures/asana/factories'
 import './setup'
 
-const CUSTOM_FIELDS = JSON.parse(
-  fs.readFileSync(
-    path.join(__dirname, 'fixtures/asana/custom-fields.json'),
-    'utf8'
-  )
-)
-const OPENED_EVENT = JSON.parse(
-  fs.readFileSync(
-    path.join(__dirname, 'fixtures/events/pull_request.opened.json'),
-    'utf8'
-  )
-)
+const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
+const OPENED_EVENT = loadFixture('fixtures/events/pull_request.opened.json')
 
 const WORKSPACE_ID = '1000'
 const PROJECT_ID = '2000'

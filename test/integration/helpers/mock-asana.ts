@@ -19,34 +19,30 @@ function dataBody(matcher: (data: JSONBody) => boolean) {
   return (body: JSONBody) => matcher(body.data)
 }
 
+/** A GET that returns a `{data: <data>}` collection or single resource. */
+function mockGet(urlPath: string, data: unknown): nock.Scope {
+  return scope().get(urlPath).query(true).reply(200, {data})
+}
+
 export function mockCustomFields(
   workspaceGid: string,
   fields: unknown[]
 ): nock.Scope {
-  return scope()
-    .get(`${API}/workspaces/${workspaceGid}/custom_fields`)
-    .query(true)
-    .reply(200, {data: fields})
+  return mockGet(`${API}/workspaces/${workspaceGid}/custom_fields`, fields)
 }
 
 export function mockSearchTasksInWorkspace(
   workspaceGid: string,
   tasks: unknown[]
 ): nock.Scope {
-  return scope()
-    .get(`${API}/workspaces/${workspaceGid}/tasks/search`)
-    .query(true)
-    .reply(200, {data: tasks})
+  return mockGet(`${API}/workspaces/${workspaceGid}/tasks/search`, tasks)
 }
 
 export function mockProjectTasks(
   projectGid: string,
   tasks: unknown[]
 ): nock.Scope {
-  return scope()
-    .get(`${API}/projects/${projectGid}/tasks`)
-    .query(true)
-    .reply(200, {data: tasks})
+  return mockGet(`${API}/projects/${projectGid}/tasks`, tasks)
 }
 
 export function mockCreateTask(
@@ -59,9 +55,7 @@ export function mockCreateTask(
 }
 
 export function mockFindTaskById(taskGid: string, task: unknown): nock.Scope {
-  return scope().get(`${API}/tasks/${taskGid}`).query(true).reply(200, {
-    data: task
-  })
+  return mockGet(`${API}/tasks/${taskGid}`, task)
 }
 
 export function mockFindTaskByIdFails(
@@ -91,10 +85,7 @@ export function mockUpdateTaskFails(taskGid: string, status = 500): nock.Scope {
 }
 
 export function mockSubtasks(taskGid: string, subtasks: unknown[]): nock.Scope {
-  return scope()
-    .get(`${API}/tasks/${taskGid}/subtasks`)
-    .query(true)
-    .reply(200, {data: subtasks})
+  return mockGet(`${API}/tasks/${taskGid}/subtasks`, subtasks)
 }
 
 export function mockAddSubtask(
@@ -108,16 +99,5 @@ export function mockAddSubtask(
 }
 
 export function mockFindUserById(userGid: string, user: unknown): nock.Scope {
-  return scope().get(`${API}/users/${userGid}`).query(true).reply(200, {
-    data: user
-  })
-}
-
-export function mockAddTaskToSection(
-  sectionGid: string,
-  matcher: (data: JSONBody) => boolean
-): nock.Scope {
-  return scope()
-    .post(`${API}/sections/${sectionGid}/addTask`, dataBody(matcher))
-    .reply(200, {data: {}})
+  return mockGet(`${API}/users/${userGid}`, user)
 }

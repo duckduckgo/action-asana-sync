@@ -1,6 +1,4 @@
-import fs from 'fs'
-import path from 'path'
-import {runAction} from './helpers/harness'
+import {runAction, loadFixture} from './helpers/harness'
 import {
   mockCustomFields,
   mockSearchTasksInWorkspace,
@@ -13,41 +11,28 @@ import {
 import {makeTask, makeSubtask, makeUser} from './fixtures/asana/factories'
 import './setup'
 
-const CUSTOM_FIELDS = JSON.parse(
-  fs.readFileSync(
-    path.join(__dirname, 'fixtures/asana/custom-fields.json'),
-    'utf8'
-  )
+const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
+const REVIEW_REQUESTED_EVENT = loadFixture(
+  'fixtures/events/pull_request.review_requested.json'
 )
-const REVIEW_REQUESTED_EVENT = JSON.parse(
-  fs.readFileSync(
-    path.join(__dirname, 'fixtures/events/pull_request.review_requested.json'),
-    'utf8'
-  )
-)
-const REVIEW_APPROVED_EVENT = JSON.parse(
-  fs.readFileSync(
-    path.join(
-      __dirname,
-      'fixtures/events/pull_request_review.submitted.approved.json'
-    ),
-    'utf8'
-  )
+const REVIEW_APPROVED_EVENT = loadFixture(
+  'fixtures/events/pull_request_review.submitted.approved.json'
 )
 
 const WORKSPACE_ID = '1000'
 
+/** Mocks the lookup+update of the PR's own Asana task, shared by every case below. */
+function mockBaseTaskLookup(taskGid: string): void {
+  mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+  mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
+  mockUpdateTask(taskGid, () => true)
+}
+
 describe('review requested', () => {
   const taskGid = '8000'
 
-  function mockBaseTaskLookup(): void {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
-    mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
-    mockUpdateTask(taskGid, () => true)
-  }
-
   it('creates a review subtask for a mapped, non-skipped reviewer', async () => {
-    mockBaseTaskLookup()
+    mockBaseTaskLookup(taskGid)
     mockSubtasks(taskGid, [])
     const addSubtaskScope = mockAddSubtask(
       taskGid,
@@ -70,47 +55,47 @@ describe('review requested', () => {
     expect(addSubtaskScope.isDone()).toBe(true)
   })
 
-  it('does not create a subtask for a reviewer in SKIPPED_USERS', async () => {
-    mockBaseTaskLookup()
-    mockSubtasks(taskGid, [])
-    // Registered so an unexpected call succeeds instead of tripping
-    // disableNetConnect; the assertion is that it's never consumed.
-    const addSubtaskScope = mockAddSubtask(
-      taskGid,
-      () => true,
-      makeSubtask({gid: '8002'})
-    )
-
-    await runAction({
-      eventName: 'pull_request',
-      payload: REVIEW_REQUESTED_EVENT,
+  const skippedOrUnmappedCases: {
+    description: string
+    inputs: Record<string, string>
+  }[] = [
+    {
+      description: 'a reviewer in SKIPPED_USERS',
       inputs: {
         SKIPPED_USERS: 'reviewer-bot',
         USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
       }
-    })
-    expect(addSubtaskScope.isDone()).toBe(false)
-  })
-
-  it('does not create a subtask for an unmapped reviewer', async () => {
-    mockBaseTaskLookup()
-    mockSubtasks(taskGid, [])
-    const addSubtaskScope = mockAddSubtask(
-      taskGid,
-      () => true,
-      makeSubtask({gid: '8003'})
-    )
-
-    await runAction({
-      eventName: 'pull_request',
-      payload: REVIEW_REQUESTED_EVENT,
+    },
+    {
+      description: 'an unmapped reviewer',
       inputs: {USER_MAP: '{}'}
-    })
-    expect(addSubtaskScope.isDone()).toBe(false)
-  })
+    }
+  ]
+
+  it.each(skippedOrUnmappedCases)(
+    'does not create a subtask for $description',
+    async ({inputs}) => {
+      mockBaseTaskLookup(taskGid)
+      mockSubtasks(taskGid, [])
+      // Registered so an unexpected call succeeds instead of tripping
+      // disableNetConnect; the assertion is that it's never consumed.
+      const addSubtaskScope = mockAddSubtask(
+        taskGid,
+        () => true,
+        makeSubtask({gid: '8002'})
+      )
+
+      await runAction({
+        eventName: 'pull_request',
+        payload: REVIEW_REQUESTED_EVENT,
+        inputs
+      })
+      expect(addSubtaskScope.isDone()).toBe(false)
+    }
+  )
 
   it('reopens an existing, completed review subtask instead of creating a new one', async () => {
-    mockBaseTaskLookup()
+    mockBaseTaskLookup(taskGid)
     const existingSubtask = makeSubtask({
       gid: '8004',
       assignee: {gid: '9500'},
@@ -144,7 +129,7 @@ describe('review requested', () => {
   })
 
   it('leaves an already-open review subtask alone (no reopen, no new task)', async () => {
-    mockBaseTaskLookup()
+    mockBaseTaskLookup(taskGid)
     const existingSubtask = makeSubtask({
       gid: '8006',
       assignee: {gid: '9501'},
@@ -177,7 +162,7 @@ describe('review requested', () => {
   })
 
   it('with INCLUDE_ASSIGNEES: creates subtasks for the union of assignees and requested reviewers, minus the author', async () => {
-    mockBaseTaskLookup()
+    mockBaseTaskLookup(taskGid)
     mockSubtasks(taskGid, [])
     // getReviewerLogins() reads assignees/requested_reviewers off the PR's
     // current state, not off the webhook's own requested_reviewer field.
@@ -228,9 +213,7 @@ describe('review approved', () => {
   const taskGid = '8100'
 
   it('marks the matching review subtask as completed', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
-    mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
-    mockUpdateTask(taskGid, () => true)
+    mockBaseTaskLookup(taskGid)
     const existingSubtask = makeSubtask({
       gid: '8101',
       assignee: {gid: '9600'},
@@ -265,9 +248,7 @@ describe('review approved', () => {
   })
 
   it('creates and immediately completes a subtask if none existed yet', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
-    mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
-    mockUpdateTask(taskGid, () => true)
+    mockBaseTaskLookup(taskGid)
     mockSubtasks(taskGid, [])
     const createdSubtask = makeSubtask({gid: '8102'})
     mockAddSubtask(taskGid, () => true, createdSubtask)
