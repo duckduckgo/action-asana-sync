@@ -37,16 +37,6 @@ const REVIEW_APPROVED_EVENT = JSON.parse(
 
 const WORKSPACE_ID = '1000'
 
-/**
- * updateReviewSubTasks() calls createOrReopenReviewSubtask() without
- * awaiting it on the review_requested path, so the subtask HTTP call can
- * still be in flight when runAction()'s underlying run() resolves. Give
- * pending microtasks a couple of turns to settle before asserting on it.
- */
-async function flushBackgroundWork(): Promise<void> {
-  await new Promise(resolve => setTimeout(resolve, 200))
-}
-
 describe('review requested', () => {
   const taskGid = '8000'
 
@@ -76,8 +66,6 @@ describe('review requested', () => {
         USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
       }
     })
-    await flushBackgroundWork()
-
     expect(setFailed).not.toHaveBeenCalled()
     expect(addSubtaskScope.isDone()).toBe(true)
   })
@@ -101,8 +89,6 @@ describe('review requested', () => {
         USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
       }
     })
-    await flushBackgroundWork()
-
     expect(addSubtaskScope.isDone()).toBe(false)
   })
 
@@ -120,16 +106,15 @@ describe('review requested', () => {
       payload: REVIEW_REQUESTED_EVENT,
       inputs: {USER_MAP: '{}'}
     })
-    await flushBackgroundWork()
-
     expect(addSubtaskScope.isDone()).toBe(false)
   })
 
-  it('reopens an existing review subtask instead of creating a new one', async () => {
+  it('reopens an existing, completed review subtask instead of creating a new one', async () => {
     mockBaseTaskLookup()
     const existingSubtask = makeSubtask({
       gid: '8004',
-      assignee: {gid: '9500'}
+      assignee: {gid: '9500'},
+      completed: true
     })
     mockSubtasks(taskGid, [existingSubtask])
     mockFindTaskById('8004', existingSubtask)
@@ -154,10 +139,88 @@ describe('review requested', () => {
         USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
       }
     })
-    await flushBackgroundWork()
-
     expect(reopenScope.isDone()).toBe(true)
     expect(addSubtaskScope.isDone()).toBe(false)
+  })
+
+  it('leaves an already-open review subtask alone (no reopen, no new task)', async () => {
+    mockBaseTaskLookup()
+    const existingSubtask = makeSubtask({
+      gid: '8006',
+      assignee: {gid: '9501'},
+      completed: false
+    })
+    mockSubtasks(taskGid, [existingSubtask])
+    mockFindTaskById('8006', existingSubtask)
+    mockFindUserById(
+      '9501',
+      makeUser({gid: '9501', email: 'reviewer@example.com'})
+    )
+    // Registered so an unexpected call succeeds instead of tripping
+    // disableNetConnect; the assertions are that neither is ever consumed.
+    const reopenScope = mockUpdateTask('8006', () => true)
+    const addSubtaskScope = mockAddSubtask(
+      taskGid,
+      () => true,
+      makeSubtask({gid: '8007'})
+    )
+
+    await runAction({
+      eventName: 'pull_request',
+      payload: REVIEW_REQUESTED_EVENT,
+      inputs: {
+        USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
+      }
+    })
+    expect(reopenScope.isDone()).toBe(false)
+    expect(addSubtaskScope.isDone()).toBe(false)
+  })
+
+  it('with INCLUDE_ASSIGNEES: creates subtasks for the union of assignees and requested reviewers, minus the author', async () => {
+    mockBaseTaskLookup()
+    mockSubtasks(taskGid, [])
+    // getReviewerLogins() reads assignees/requested_reviewers off the PR's
+    // current state, not off the webhook's own requested_reviewer field.
+    const payload = {
+      ...REVIEW_REQUESTED_EVENT,
+      pull_request: {
+        ...REVIEW_REQUESTED_EVENT.pull_request,
+        assignees: [{login: 'alice'}],
+        requested_reviewers: [{login: 'reviewer-bot'}]
+      }
+    }
+    const aliceSubtask = mockAddSubtask(
+      taskGid,
+      data => {
+        expect(data.assignee).toBe('alice@example.com')
+        return true
+      },
+      makeSubtask({gid: '8008'})
+    )
+    const reviewerBotSubtask = mockAddSubtask(
+      taskGid,
+      data => {
+        expect(data.assignee).toBe('reviewer@example.com')
+        return true
+      },
+      makeSubtask({gid: '8009'})
+    )
+
+    const {setFailed} = await runAction({
+      eventName: 'pull_request',
+      payload,
+      inputs: {
+        INCLUDE_ASSIGNEES: 'true',
+        USER_MAP: JSON.stringify({
+          alice: 'alice@example.com',
+          'reviewer-bot': 'reviewer@example.com'
+        })
+      }
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(aliceSubtask.isDone()).toBe(true)
+    expect(reviewerBotSubtask.isDone()).toBe(true)
   })
 })
 
@@ -170,7 +233,8 @@ describe('review approved', () => {
     mockUpdateTask(taskGid, () => true)
     const existingSubtask = makeSubtask({
       gid: '8101',
-      assignee: {gid: '9600'}
+      assignee: {gid: '9600'},
+      completed: true
     })
     mockSubtasks(taskGid, [existingSubtask])
     mockFindTaskById('8101', existingSubtask)
