@@ -20,13 +20,6 @@ export default [
     // no-undef does not), so defer to the @typescript-eslint equivalents
     // here, carrying over the leniency ddg's core rule config above grants.
     files: ['**/*.ts'],
-    settings: {
-      'import/resolver': {
-        typescript: {
-          alwaysTryTypes: true
-        }
-      }
-    },
     rules: {
       'no-undef': 'off',
       'no-unused-vars': 'off',
