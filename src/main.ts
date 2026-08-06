@@ -101,7 +101,6 @@ export async function createOrReopenReviewSubtask(
       : author
   const subtaskObj = {
     name: `Review Request: ${title}`,
-    // eslint-disable-next-line camelcase
     html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
@@ -210,7 +209,6 @@ async function findPRTask(
     // at 100 most recent tasks in destination project
     // https://developers.asana.com/reference/searchtasksforworkspace#eventual-consistency
     const projectTasks = await client.tasks.findByProject(PROJECT_ID, {
-      // eslint-disable-next-line camelcase
       opt_fields: 'custom_fields',
       limit: 100
     })
@@ -242,7 +240,6 @@ async function createPRTask(
   info(`Creating new PR task for PR from ${payload.pull_request.user.login}`)
   const taskObjBase = {
     workspace: ASANA_WORKSPACE_ID,
-    // eslint-disable-next-line camelcase
     custom_fields: {
       [customFields.url.gid]: payload.pull_request.html_url,
       [customFields.status.gid]: prStatus
@@ -395,10 +392,8 @@ ${truncatedBody}`
       // Try using html notes first and fall back to unformatted if this fails
       await client.tasks.updateTask(taskId, {
         name: title,
-        // eslint-disable-next-line camelcase
         html_notes: htmlNotes,
         completed: closeTask,
-        // eslint-disable-next-line camelcase
         custom_fields: {
           [customFields.status.gid]: statusGid
         }
@@ -409,7 +404,6 @@ ${truncatedBody}`
         name: title,
         notes,
         completed: closeTask,
-        // eslint-disable-next-line camelcase
         custom_fields: {
           [customFields.status.gid]: statusGid
         }

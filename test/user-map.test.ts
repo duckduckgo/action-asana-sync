@@ -5,7 +5,7 @@ const REPO_NAME = 'internal-github-asana-utils'
 
 function loadUserMapModule(): typeof import('../src/user-map') {
   jest.resetModules()
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   return require('../src/user-map')
 }
 

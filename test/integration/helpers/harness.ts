@@ -68,14 +68,14 @@ export async function runAction(
     process.env[inputEnvName(key)] = value
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const core = require('@actions/core')
   const setOutput = jest.spyOn(core, 'setOutput')
   const setFailed = jest.spyOn(core, 'setFailed')
   jest.spyOn(core, 'info').mockImplementation(() => undefined)
   jest.spyOn(core, 'debug').mockImplementation(() => undefined)
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const main = require('../../../src/main')
   await main.done
 

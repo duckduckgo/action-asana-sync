@@ -85,7 +85,6 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfComplet
             : author;
         const subtaskObj = {
             name: `Review Request: ${title}`,
-            // eslint-disable-next-line camelcase
             html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
@@ -184,7 +183,6 @@ function findPRTask(customFields) {
             // at 100 most recent tasks in destination project
             // https://developers.asana.com/reference/searchtasksforworkspace#eventual-consistency
             const projectTasks = yield exports.client.tasks.findByProject(PROJECT_ID, {
-                // eslint-disable-next-line camelcase
                 opt_fields: 'custom_fields',
                 limit: 100
             });
@@ -209,7 +207,6 @@ function createPRTask(title, notes, prStatus, customFields) {
         (0, core_1.info)(`Creating new PR task for PR from ${payload.pull_request.user.login}`);
         const taskObjBase = {
             workspace: ASANA_WORKSPACE_ID,
-            // eslint-disable-next-line camelcase
             custom_fields: {
                 [customFields.url.gid]: payload.pull_request.html_url,
                 [customFields.status.gid]: prStatus
@@ -337,10 +334,8 @@ ${truncatedBody}`;
                 // Try using html notes first and fall back to unformatted if this fails
                 yield exports.client.tasks.updateTask(taskId, {
                     name: title,
-                    // eslint-disable-next-line camelcase
                     html_notes: htmlNotes,
                     completed: closeTask,
-                    // eslint-disable-next-line camelcase
                     custom_fields: {
                         [customFields.status.gid]: statusGid
                     }
@@ -352,7 +347,6 @@ ${truncatedBody}`;
                     name: title,
                     notes,
                     completed: closeTask,
-                    // eslint-disable-next-line camelcase
                     custom_fields: {
                         [customFields.status.gid]: statusGid
                     }
@@ -434,36 +428,28 @@ const md = (0, markdown_it_1.default)('zero', { linkify: true }).enable([
     'strikethrough'
 ]);
 // Asana doesn't let us use <p></p> so instead let's just add a newline at the end
-// eslint-disable-next-line camelcase
 md.renderer.rules.paragraph_open = function () {
     return '';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.paragraph_close = function () {
     return '\n\n';
 };
 // Table support fixes for Asana
-// eslint-disable-next-line camelcase
 md.renderer.rules.thead_open = function () {
     return '';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.thead_close = function () {
     return '';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.th_open = function () {
     return '<td><strong>';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.th_close = function () {
     return '</strong></td>';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.tbody_open = function () {
     return '';
 };
-// eslint-disable-next-line camelcase
 md.renderer.rules.tbody_close = function () {
     return '';
 };
@@ -7081,7 +7067,7 @@ module.exports = formats;
 
 function formats(mode) {
   mode = mode == 'full' ? 'full' : 'fast';
-  return util.copy(formats[mode]);
+  return util.copy(formats[mode], Object.create(null));
 }
 
 
@@ -7248,6 +7234,11 @@ function compile(schema, root, localRefs, baseId) {
     , defaultsHash = {}
     , customRules = [];
 
+  function patternCode(i, patterns) {
+    var regExpCode = opts.regExp ? 'regExp' : 'new RegExp';
+    return 'var pattern' + i + ' = ' + regExpCode + '(' + util.toQuotedString(patterns[i]) + ');';
+  }
+
   root = root || { schema: schema, refVal: refVal, refs: refs };
 
   var c = checkCompiling.call(this, schema, root, baseId);
@@ -7334,6 +7325,7 @@ function compile(schema, root, localRefs, baseId) {
         'equal',
         'ucs2length',
         'ValidationError',
+        'regExp',
         sourceCode
       );
 
@@ -7347,7 +7339,8 @@ function compile(schema, root, localRefs, baseId) {
         customRules,
         equal,
         ucs2length,
-        ValidationError
+        ValidationError,
+        opts.regExp
       );
 
       refVal[0] = validate;
@@ -7561,11 +7554,6 @@ function compIndex(schema, root, baseId) {
     if (c.schema == schema && c.root == root && c.baseId == baseId) return i;
   }
   return -1;
-}
-
-
-function patternCode(i, patterns) {
-  return 'var pattern' + i + ' = new RegExp(' + util.toQuotedString(patterns[i]) + ');';
 }
 
 
@@ -10306,6 +10294,7 @@ module.exports = function generate_pattern(it, $keyword, $ruleType) {
   var $errSchemaPath = it.errSchemaPath + '/' + $keyword;
   var $breakOnError = !it.opts.allErrors;
   var $data = 'data' + ($dataLvl || '');
+  var $valid = 'valid' + $lvl;
   var $isData = it.opts.$data && $schema && $schema.$data,
     $schemaValue;
   if ($isData) {
@@ -10314,12 +10303,21 @@ module.exports = function generate_pattern(it, $keyword, $ruleType) {
   } else {
     $schemaValue = $schema;
   }
-  var $regexp = $isData ? '(new RegExp(' + $schemaValue + '))' : it.usePattern($schema);
-  out += 'if ( ';
+  var $regExpCode = it.opts.regExp ? 'regExp' : 'new RegExp';
   if ($isData) {
-    out += ' (' + ($schemaValue) + ' !== undefined && typeof ' + ($schemaValue) + ' != \'string\') || ';
+    out += ' var ' + ($valid) + ' = true; try { ' + ($valid) + ' = ' + ($regExpCode) + '(' + ($schemaValue) + ').test(' + ($data) + '); } catch(e) { ' + ($valid) + ' = false; } if ( ';
+    if ($isData) {
+      out += ' (' + ($schemaValue) + ' !== undefined && typeof ' + ($schemaValue) + ' != \'string\') || ';
+    }
+    out += ' !' + ($valid) + ') {';
+  } else {
+    var $regexp = it.usePattern($schema);
+    out += ' if ( ';
+    if ($isData) {
+      out += ' (' + ($schemaValue) + ' !== undefined && typeof ' + ($schemaValue) + ' != \'string\') || ';
+    }
+    out += ' !' + ($regexp) + '.test(' + ($data) + ') ) {';
   }
-  out += ' !' + ($regexp) + '.test(' + ($data) + ') ) {   ';
   var $$outStack = $$outStack || [];
   $$outStack.push(out);
   out = ''; /* istanbul ignore else */
