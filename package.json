@@ -46,7 +46,7 @@
     "eslint-plugin-jest": "^29.16.0",
     "globals": "^17.9.0",
     "jest": "^27.2.5",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "4.1.0",
     "nock": "^13.5.6",
     "prettier": "2.8.8",
     "ts-jest": "^27.1.2",
