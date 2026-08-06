@@ -1,9 +1,9 @@
 import nock from 'nock'
 
-// The `asana` client (github:Asana/node-asana) talks plain REST+JSON to
-// this base URL via the (deprecated) `request` package, which rides on
-// Node's core http/https modules -- so nock can intercept it transparently.
-// Endpoints below were confirmed by reading node_modules/asana/lib/resources.
+// The `asana` client (npm package) talks plain REST+JSON to this base URL
+// via `superagent`, which rides on Node's core http/https modules -- so
+// nock can intercept it transparently. Endpoints below were confirmed by
+// reading node_modules/asana/src/api/*.js.
 const BASE_URL = 'https://app.asana.com'
 const API = '/api/1.0'
 

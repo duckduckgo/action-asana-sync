@@ -65,14 +65,21 @@ describe('existing pull request updates', () => {
   it('creates a new task if no matching task is found after exhausting retries', async () => {
     // Pin Math.random so the retry loop's jittered maxRetries (3-7) and
     // per-attempt delay (20-30s) are deterministic, and short-circuit the
-    // real setTimeout so the 3 waits don't actually take a minute.
+    // real setTimeout so the 3 waits don't actually take a minute. Only the
+    // retry-wait delays (20-30s) are short-circuited: the asana client also
+    // schedules its own request-timeout timer via setTimeout, which must run
+    // for real so it can be cleared once nock resolves the (instant) request.
     jest.spyOn(global.Math, 'random').mockReturnValue(0)
+    const realSetTimeout = global.setTimeout
     jest
       .spyOn(global, 'setTimeout')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .mockImplementation((fn: any) => {
-        fn()
-        return 0 as unknown as NodeJS.Timeout
+      .mockImplementation((fn: any, delay?: number) => {
+        if (typeof delay === 'number' && delay >= 20000 && delay <= 30000) {
+          fn()
+          return 0 as unknown as NodeJS.Timeout
+        }
+        return realSetTimeout(fn, delay)
       })
 
     mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)

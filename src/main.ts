@@ -1,4 +1,10 @@
-import asana, {Client} from 'asana'
+import {
+  ApiClient,
+  CustomFieldsApi,
+  SectionsApi,
+  TasksApi,
+  UsersApi
+} from 'asana'
 import {info, setFailed, getInput, debug, setOutput} from '@actions/core'
 import {context} from '@actions/github'
 import {
@@ -19,16 +25,40 @@ const CUSTOM_FIELD_NAMES = {
 
 type PRState = 'Open' | 'Closed' | 'Merged' | 'Approved' | 'Draft'
 
-type PRFields = {
-  url: asana.resources.CustomField
-  status: asana.resources.CustomField
+// The `asana` package's published types are untyped (`any`) throughout, so we
+// declare narrow shapes here for the fields this action actually reads/writes.
+interface AsanaCustomField {
+  gid: string
+  name: string
+  enum_options?: Array<{gid: string; name: string}>
 }
-export const client = Client.create({
-  defaultHeaders: {
-    'asana-enable':
-      'new_user_task_lists,new_project_templates,new_goal_memberships'
-  }
-}).useAccessToken(getInput('ASANA_ACCESS_TOKEN', {required: true}))
+
+interface AsanaTask {
+  gid: string
+  permalink_url: string
+  completed?: boolean
+  assignee?: {gid: string} | null
+  memberships: Array<{project: {gid: string}}>
+  custom_fields: Array<{gid: string; display_value: string}>
+}
+
+type PRFields = {
+  url: AsanaCustomField
+  status: AsanaCustomField
+}
+
+ApiClient.instance.authentications.token.accessToken = getInput(
+  'ASANA_ACCESS_TOKEN',
+  {required: true}
+)
+ApiClient.instance.defaultHeaders = {
+  'asana-enable':
+    'new_user_task_lists,new_project_templates,new_goal_memberships'
+}
+export const tasksApi = new TasksApi()
+const usersApi = new UsersApi()
+const customFieldsApi = new CustomFieldsApi()
+const sectionsApi = new SectionsApi()
 const ASANA_WORKSPACE_ID = getInput('ASANA_WORKSPACE_ID', {required: true})
 const PROJECT_ID = getInput('ASANA_PROJECT_ID', {required: true})
 // Users which will not receive PRs/reviews tasks
@@ -47,12 +77,11 @@ const INCLUDE_ASSIGNEES = getInput('INCLUDE_ASSIGNEES') === 'true'
 export async function createOrReopenReviewSubtask(
   taskId: string,
   reviewer: string,
-  subtasks: asana.resources.ResourceList<asana.resources.Tasks.Type>,
+  subtasks: AsanaTask[],
   reopenIfCompleted = true
-): Promise<asana.resources.Tasks.Type | null> {
+): Promise<AsanaTask | null> {
   const payload = context.payload as PullRequestEvent
   const title = payload.pull_request.title
-  //  const subtasks = await client.tasks.subtasks(taskId)
   const githubAuthor = payload.pull_request.user.login
   const author = (await getUserFromLogin(githubAuthor)) || githubAuthor
   const reviewerGidOrEmail = await getUserFromLogin(reviewer)
@@ -68,14 +97,14 @@ export async function createOrReopenReviewSubtask(
   }
 
   let reviewSubtask
-  for (let subtask of subtasks.data) {
+  for (let subtask of subtasks) {
     info(`Checking subtask ${subtask.gid} assignee`)
-    subtask = await client.tasks.findById(subtask.gid)
+    subtask = (await tasksApi.getTask(subtask.gid)).data
     if (!subtask.assignee) {
       info(`Task ${subtask.gid} has no assignee`)
       continue
     }
-    const asanaUser = await client.users.findById(subtask.assignee.gid)
+    const asanaUser = (await usersApi.getUser(subtask.assignee.gid)).data
     if (
       asanaUser.email === reviewerGidOrEmail ||
       asanaUser.gid === reviewerGidOrEmail
@@ -116,13 +145,15 @@ See parent task for more information</body>`,
       `Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`
     )
     info(`Creating new subtask can fail when too many subtasks are nested!`)
-    reviewSubtask = await client.tasks.addSubtask(taskId, subtaskObj)
+    reviewSubtask = (
+      await tasksApi.createSubtaskForTask({data: subtaskObj}, taskId)
+    ).data
   } else if (!reviewSubtask.completed) {
     info(`Review subtask for ${reviewer} is already open`)
   } else if (reopenIfCompleted) {
     info(`Reopening a review subtask for ${reviewer}`)
     // TODO add a comment?
-    await client.tasks.updateTask(reviewSubtask.gid, {completed: false})
+    await tasksApi.updateTask({data: {completed: false}}, reviewSubtask.gid)
   } else {
     info(`Leaving the completed review subtask for ${reviewer} as it is`)
   }
@@ -132,7 +163,7 @@ See parent task for more information</body>`,
 async function updateReviewSubTasks(taskId: string): Promise<void> {
   info(`Creating/updating review subtasks for task ${taskId}`)
   const payload = context.payload as PullRequestEvent
-  const subtasks = await client.tasks.subtasks(taskId)
+  const subtasks = (await tasksApi.getSubtasksForTask(taskId)).data
   if (
     context.eventName === 'pull_request' ||
     context.eventName === 'pull_request_target'
@@ -177,43 +208,46 @@ async function updateReviewSubTasks(taskId: string): Promise<void> {
       )
       if (subtask !== null) {
         info(`Completing review subtask for ${reviewer.login}: ${subtask.gid}`)
-        await client.tasks.updateTask(subtask.gid, {completed: true})
+        await tasksApi.updateTask({data: {completed: true}}, subtask.gid)
       }
     }
   }
 }
 
 async function closeSubtasks(taskId: string) {
-  const subtasks = await client.tasks.subtasks(taskId)
+  const subtasks = (await tasksApi.getSubtasksForTask(taskId)).data
 
-  for (const subtask of subtasks.data) {
-    await client.tasks.updateTask(subtask.gid, {completed: true})
+  for (const subtask of subtasks) {
+    await tasksApi.updateTask({data: {completed: true}}, subtask.gid)
   }
 }
 
-async function findPRTask(
-  customFields: PRFields
-): Promise<asana.resources.Tasks.Type | null> {
+async function findPRTask(customFields: PRFields): Promise<AsanaTask | null> {
   // Let's first try to seaech using PR URL
   const payload = context.payload as PullRequestEvent
   const prURL = payload.pull_request.html_url
 
-  const prTasks = await client.tasks.searchInWorkspace(ASANA_WORKSPACE_ID, {
+  const searchOpts: Record<string, string> = {
     [`custom_fields.${customFields.url.gid}.value`]: prURL
-  })
-  if (prTasks.data.length > 0) {
-    info(`Found PR task using searchInWorkspace: ${prTasks.data[0].gid}`)
-    return prTasks.data[0]
+  }
+  const prTasks = (
+    await tasksApi.searchTasksForWorkspace(ASANA_WORKSPACE_ID, searchOpts)
+  ).data as AsanaTask[]
+  if (prTasks.length > 0) {
+    info(`Found PR task using searchTasksForWorkspace: ${prTasks[0].gid}`)
+    return prTasks[0]
   } else {
-    // searchInWorkspace can fail for recently created Asana tasks. Let's look
-    // at 100 most recent tasks in destination project
+    // searchTasksForWorkspace can fail for recently created Asana tasks. Let's
+    // look at 100 most recent tasks in destination project
     // https://developers.asana.com/reference/searchtasksforworkspace#eventual-consistency
-    const projectTasks = await client.tasks.findByProject(PROJECT_ID, {
-      opt_fields: 'custom_fields',
-      limit: 100
-    })
+    const projectTasks = (
+      await tasksApi.getTasksForProject(PROJECT_ID, {
+        opt_fields: 'custom_fields',
+        limit: 100
+      })
+    ).data as AsanaTask[]
 
-    for (const task of projectTasks.data) {
+    for (const task of projectTasks) {
       info(`Checking task ${task.gid} for PR link`)
       for (const field of task.custom_fields) {
         if (
@@ -235,7 +269,7 @@ async function createPRTask(
   notes: string,
   prStatus: string,
   customFields: PRFields
-): Promise<asana.resources.Tasks.Type> {
+): Promise<AsanaTask> {
   const payload = context.payload as PullRequestEvent
   info(`Creating new PR task for PR from ${payload.pull_request.user.login}`)
   const taskObjBase = {
@@ -264,7 +298,7 @@ async function createPRTask(
 
     // Verify we can access parent or we can't add it
     try {
-      await client.tasks.findById(parentID)
+      await tasksApi.getTask(parentID)
     } catch (e) {
       info(`Can't access parent task: ${parentID}: ${e}`)
       info(`Add 'dax' user to respective projects to enable this feature`)
@@ -272,7 +306,8 @@ async function createPRTask(
     }
   }
 
-  return client.tasks.create({...taskObjBase, ...parentObj})
+  return (await tasksApi.createTask({data: {...taskObjBase, ...parentObj}}))
+    .data
 }
 
 async function run(): Promise<void> {
@@ -362,7 +397,9 @@ ${truncatedBody}`
     setOutput('task_url', task.permalink_url)
     const sectionId = getInput('move_to_section_id')
     if (sectionId) {
-      await client.sections.addTask(sectionId, {task: task.gid})
+      await sectionsApi.addTaskForSection(sectionId, {
+        body: {data: {task: task.gid}}
+      })
     }
     const taskId = task.gid
     // Whether we want to close the PR task
@@ -377,7 +414,7 @@ ${truncatedBody}`
       // Unless the task is in specific projects automatically close
       closeTask = true
       info(`Considering whether to close PR task itself...`)
-      const fullTask = await client.tasks.findById(taskId)
+      const fullTask = (await tasksApi.getTask(taskId)).data as AsanaTask
       for (const membership of fullTask.memberships) {
         if (NO_AUTOCLOSE_LIST.includes(membership.project.gid)) {
           info(`Tasks is in one of NO_AUTOCLOSE_PROJECTS. Not closing`)
@@ -390,24 +427,34 @@ ${truncatedBody}`
 
     try {
       // Try using html notes first and fall back to unformatted if this fails
-      await client.tasks.updateTask(taskId, {
-        name: title,
-        html_notes: htmlNotes,
-        completed: closeTask,
-        custom_fields: {
-          [customFields.status.gid]: statusGid
-        }
-      })
+      await tasksApi.updateTask(
+        {
+          data: {
+            name: title,
+            html_notes: htmlNotes,
+            completed: closeTask,
+            custom_fields: {
+              [customFields.status.gid]: statusGid
+            }
+          }
+        },
+        taskId
+      )
     } catch (err) {
       info(`Updating task with HTML notes failed. Retrying with plaintext`)
-      await client.tasks.updateTask(taskId, {
-        name: title,
-        notes,
-        completed: closeTask,
-        custom_fields: {
-          [customFields.status.gid]: statusGid
-        }
-      })
+      await tasksApi.updateTask(
+        {
+          data: {
+            name: title,
+            notes,
+            completed: closeTask,
+            custom_fields: {
+              [customFields.status.gid]: statusGid
+            }
+          }
+        },
+        taskId
+      )
     }
   } catch (error) {
     if (error instanceof Error)
@@ -416,16 +463,11 @@ ${truncatedBody}`
 }
 
 async function findCustomFields(workspaceGid: string): Promise<PRFields> {
-  const apiResponse = await client.customFields.getCustomFieldsForWorkspace(
-    workspaceGid
-  )
-  // pull all fields from the API with the streaming
-  const stream = apiResponse.stream()
-  const customFields: asana.resources.CustomFields.Type[] = []
-  stream.on('data', field => {
-    customFields.push(field)
-  })
-  await new Promise<void>(resolve => stream.on('end', resolve))
+  const customFields = (
+    await customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
+      limit: 100
+    })
+  ).data as AsanaCustomField[]
 
   const githubUrlField = customFields.find(
     f => f.name === CUSTOM_FIELD_NAMES.url
@@ -441,8 +483,8 @@ async function findCustomFields(workspaceGid: string): Promise<PRFields> {
     debug(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField?.gid}`)
   }
   return {
-    url: githubUrlField as asana.resources.CustomField,
-    status: githubStatusField as asana.resources.CustomField
+    url: githubUrlField,
+    status: githubStatusField
   }
 }
 
