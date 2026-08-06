@@ -369,11 +369,22 @@ ${truncatedBody}`;
         }
     });
 }
+function getAllCustomFieldsForWorkspace(workspaceGid) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const customFields = [];
+        let page = (yield customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
+            limit: 100
+        }));
+        while (page.data) {
+            customFields.push(...page.data);
+            page = yield page.nextPage();
+        }
+        return customFields;
+    });
+}
 function findCustomFields(workspaceGid) {
     return __awaiter(this, void 0, void 0, function* () {
-        const customFields = (yield customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
-            limit: 100
-        })).data;
+        const customFields = yield getAllCustomFieldsForWorkspace(workspaceGid);
         const githubUrlField = customFields.find(f => f.name === CUSTOM_FIELD_NAMES.url);
         const githubStatusField = customFields.find(f => f.name === CUSTOM_FIELD_NAMES.status);
         if (!githubUrlField || !githubStatusField) {

@@ -1,6 +1,7 @@
 import {runAction, loadFixture} from './helpers/harness'
 import {
   mockCustomFields,
+  mockCustomFieldsPage,
   mockCreateTask,
   mockFindTaskById,
   mockFindTaskByIdFails,
@@ -137,6 +138,35 @@ describe('new pull request (opened)', () => {
 
     expect(setFailed).not.toHaveBeenCalled()
     expect(plaintextUpdate.isDone()).toBe(true)
+  })
+
+  it('paginates through all custom fields when the workspace has more than one page', async () => {
+    // The workspace has >100 custom fields, so the ones we need ("Github URL"
+    // and "Github Status") only show up on the second page of results.
+    const firstPageFields = Array.from({length: 100}, (_, i) => ({
+      gid: `unrelated-${i}`,
+      name: `Unrelated field ${i}`
+    }))
+    mockCustomFieldsPage(WORKSPACE_ID, firstPageFields, {
+      nextOffset: 'page-2-token'
+    })
+    mockCustomFieldsPage(WORKSPACE_ID, CUSTOM_FIELDS, {
+      offset: 'page-2-token'
+    })
+    mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
+    const createdTask = makeTask({gid: '5005'})
+    const createScope = mockCreateTask(() => true, createdTask)
+    mockSubtasks('5005', [])
+    mockUpdateTask('5005', () => true)
+
+    const {setFailed, setOutput} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'created')
+    expect(createScope.isDone()).toBe(true)
   })
 
   it('fails gracefully when the required custom fields are missing in the workspace', async () => {

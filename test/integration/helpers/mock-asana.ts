@@ -31,6 +31,27 @@ export function mockCustomFields(
   return mockGet(`${API}/workspaces/${workspaceGid}/custom_fields`, fields)
 }
 
+/**
+ * Mocks a single page of the (offset-paginated) custom fields listing.
+ * Pass `nextOffset` to indicate more pages follow, and `offset` to match
+ * the request that asks for this specific page.
+ */
+export function mockCustomFieldsPage(
+  workspaceGid: string,
+  fields: unknown[],
+  {offset, nextOffset}: {offset?: string; nextOffset?: string} = {}
+): nock.Scope {
+  const query: Record<string, string> = {limit: '100'}
+  if (offset) query.offset = offset
+  return scope()
+    .get(`${API}/workspaces/${workspaceGid}/custom_fields`)
+    .query(query)
+    .reply(200, {
+      data: fields,
+      next_page: nextOffset ? {offset: nextOffset} : null
+    })
+}
+
 export function mockSearchTasksInWorkspace(
   workspaceGid: string,
   tasks: unknown[]
