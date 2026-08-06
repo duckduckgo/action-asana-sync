@@ -462,12 +462,31 @@ ${truncatedBody}`
   }
 }
 
+// The asana client's `Collection` wrapper (returned because
+// `ApiClient.instance.RETURN_COLLECTION` defaults to true) exposes `.data`
+// for the current page and a `.nextPage()` method that resolves to the next
+// `Collection`, or to `{data: null}` once there are no more pages.
+interface AsanaCollectionPage {
+  data: AsanaCustomField[] | null
+  nextPage(): Promise<AsanaCollectionPage>
+}
+
+async function getAllCustomFieldsForWorkspace(
+  workspaceGid: string
+): Promise<AsanaCustomField[]> {
+  const customFields: AsanaCustomField[] = []
+  let page = (await customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
+    limit: 100
+  })) as AsanaCollectionPage
+  while (page.data) {
+    customFields.push(...page.data)
+    page = await page.nextPage()
+  }
+  return customFields
+}
+
 async function findCustomFields(workspaceGid: string): Promise<PRFields> {
-  const customFields = (
-    await customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
-      limit: 100
-    })
-  ).data as AsanaCustomField[]
+  const customFields = await getAllCustomFieldsForWorkspace(workspaceGid)
 
   const githubUrlField = customFields.find(
     f => f.name === CUSTOM_FIELD_NAMES.url
