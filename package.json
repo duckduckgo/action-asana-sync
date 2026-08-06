@@ -29,13 +29,12 @@
   "dependencies": {
     "@actions/core": "^2.0.3",
     "@actions/github": "^6.0.0",
-    "asana": "github:Asana/node-asana#3fc4ad1bf00637431cb09d0c3ba320a896fdafc0",
+    "asana": "^3.1.12",
     "markdown-it": "^14.0.0"
   },
   "devDependencies": {
     "@duckduckgo/eslint-config": "github:duckduckgo/eslint-config#v0.2.1",
     "@octokit/webhooks-types": "^7.6.1",
-    "@types/asana": "^0.18.16",
     "@types/jest": "^27.5.2",
     "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^13.0.7",
