@@ -21,8 +21,8 @@ describe('pull request closed/merged', () => {
     const taskGid = '7000'
     mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
     mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
-    // closeSubtasks() runs un-awaited in main.ts; mock permissively so it
-    // doesn't trip disableNetConnect if it fires before the test ends.
+    // Mocked permissively: closeSubtasks() is covered in detail by
+    // approvals.test.ts.
     mockSubtasks(taskGid, [makeSubtask({gid: '7001'})]).persist()
     mockUpdateTask('7001', () => true).persist()
     mockFindTaskById(taskGid, makeTask({gid: taskGid, memberships: []}))

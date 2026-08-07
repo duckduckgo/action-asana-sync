@@ -1,5 +1,12 @@
 # Plan: `REVIEW_TASKS_AS_APPROVALS` — review subtasks as Asana Approvals
 
+> **Status: implemented.** This is the design doc the implementation was written
+> from, kept for the reasoning behind the Asana API constraints and the two
+> judgement calls in §2. `README.md` is the user-facing description. The one
+> departure from the plan below: the `commented` → `pending` question in §2 was
+> settled in favour of `pending`, but scoped so it only ever affects approval
+> tasks — a plain review subtask is still never reopened by a comment.
+
 Implementation plan for a new opt-in action input that creates the per-reviewer
 review subtasks as Asana **approval** tasks, and then drives their approval
 status from the Github review verdict.

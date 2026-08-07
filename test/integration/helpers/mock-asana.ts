@@ -119,6 +119,12 @@ export function mockAddSubtask(
     .reply(201, {data: responseSubtask})
 }
 
+export function mockAddSubtaskFails(taskGid: string, status = 400): nock.Scope {
+  return scope()
+    .post(`${API}/tasks/${taskGid}/subtasks`)
+    .reply(status, {errors: [{message: 'subtask creation failed'}]})
+}
+
 export function mockFindUserById(userGid: string, user: unknown): nock.Scope {
   return mockGet(`${API}/users/${userGid}`, user)
 }

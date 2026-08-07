@@ -1,6 +1,42 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 35238:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.outcomeForReview = void 0;
+/**
+ * The outcome a `pull_request_review` event should record for the review's
+ * author. An `approved` or `changes_requested` review carries its own verdict;
+ * anything else - a `commented` review, or a review that was dismissed - leaves
+ * the review outstanding, so it converges to `pending`.
+ *
+ * A review can be `edited` after the fact, in which case the payload still
+ * carries the verdict it was edited into, so it is mapped the same way as a
+ * freshly submitted one.
+ */
+function outcomeForReview(action, state) {
+    if (action !== 'submitted' && action !== 'edited') {
+        // `dismissed`, or an action Github adds later: no verdict to read.
+        return 'pending';
+    }
+    switch (state) {
+        case 'approved':
+            return 'approved';
+        case 'changes_requested':
+            return 'changes_requested';
+        default:
+            return 'pending';
+    }
+}
+exports.outcomeForReview = outcomeForReview;
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -20,6 +56,7 @@ exports.done = exports.createOrReopenReviewSubtask = exports.tasksApi = void 0;
 const asana_1 = __nccwpck_require__(30576);
 const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
+const approvals_1 = __nccwpck_require__(35238);
 const markdown_1 = __nccwpck_require__(15821);
 const reviewers_1 = __nccwpck_require__(40512);
 const user_map_1 = __nccwpck_require__(21757);
@@ -47,12 +84,60 @@ const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',');
 const ASSIGN_PR_AUTHOR = (0, core_1.getInput)('ASSIGN_PR_AUTHOR') === 'true';
 // Create review subtasks for assignees as well as for requested reviewers
 const INCLUDE_ASSIGNEES = (0, core_1.getInput)('INCLUDE_ASSIGNEES') === 'true';
-function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfCompleted = true) {
+// Create review subtasks as Asana approval tasks. This only affects tasks we
+// create: how an existing review subtask is updated is decided by that task's
+// own resource_subtype, so review subtasks that predate this option keep the
+// plain completed/not-completed behaviour they were created with.
+const REVIEW_TASKS_AS_APPROVALS = (0, core_1.getInput)('REVIEW_TASKS_AS_APPROVALS') === 'true';
+/**
+ * Records a review verdict on a review subtask.
+ *
+ * For an approval task, `approval_status` and `completed` are the same piece of
+ * state: Asana keeps them in sync, so `changes_requested` completes the task and
+ * completing a task means `approved`. For a plain task there is only
+ * `completed`, which is what this action has always written.
+ */
+function setReviewOutcome(subtask, outcome) {
     return __awaiter(this, void 0, void 0, function* () {
-        const payload = github_1.context.payload;
-        const title = payload.pull_request.title;
-        const githubAuthor = payload.pull_request.user.login;
-        const author = (yield (0, user_map_1.getUserFromLogin)(githubAuthor)) || githubAuthor;
+        const completed = outcome !== 'pending';
+        const data = subtask.resource_subtype === 'approval'
+            ? { completed, approval_status: outcome }
+            : { completed };
+        (0, core_1.info)(`Setting review subtask ${subtask.gid} to ${JSON.stringify(data)}`);
+        yield exports.tasksApi.updateTask({ data }, subtask.gid);
+    });
+}
+/**
+ * Creates a review subtask, as an approval task where that is enabled.
+ * Approvals need an Asana plan that supports them, so a rejected create is
+ * retried as a plain task rather than failing the review sync outright.
+ */
+function createReviewSubtask(taskId, subtaskObj) {
+    return __awaiter(this, void 0, void 0, function* () {
+        (0, core_1.info)(`Creating new subtask can fail when too many subtasks are nested!`);
+        if (!REVIEW_TASKS_AS_APPROVALS) {
+            return (yield exports.tasksApi.createSubtaskForTask({ data: subtaskObj }, taskId))
+                .data;
+        }
+        try {
+            return (yield exports.tasksApi.createSubtaskForTask({
+                data: Object.assign(Object.assign({}, subtaskObj), { resource_subtype: 'approval', approval_status: 'pending' })
+            }, taskId)).data;
+        }
+        catch (e) {
+            (0, core_1.info)(`Creating an approval subtask failed: ${e}`);
+            (0, core_1.info)(`Retrying as a plain task. Does this Asana plan support approvals?`);
+            return (yield exports.tasksApi.createSubtaskForTask({ data: subtaskObj }, taskId))
+                .data;
+        }
+    });
+}
+/**
+ * Resolves a Github login to the Asana user (gid or email) who should get the
+ * review task, or null if this reviewer should be skipped.
+ */
+function resolveReviewer(reviewer) {
+    return __awaiter(this, void 0, void 0, function* () {
         const reviewerGidOrEmail = yield (0, user_map_1.getUserFromLogin)(reviewer);
         (0, core_1.info)(`Review requested from ${reviewer} (${reviewerGidOrEmail})`);
         if (SKIPPED_USERS_LIST.includes(reviewer) ||
@@ -60,7 +145,12 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfComplet
             (0, core_1.info)(`Skipping review subtask creation for ${reviewer} - member of SKIPPED_USERS`);
             return null;
         }
-        let reviewSubtask;
+        return reviewerGidOrEmail;
+    });
+}
+/** Finds the subtask assigned to the given Asana user, if there is one. */
+function findSubtaskForAssignee(subtasks, assigneeGidOrEmail) {
+    return __awaiter(this, void 0, void 0, function* () {
         for (let subtask of subtasks) {
             (0, core_1.info)(`Checking subtask ${subtask.gid} assignee`);
             subtask = (yield exports.tasksApi.getTask(subtask.gid)).data;
@@ -69,13 +159,26 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfComplet
                 continue;
             }
             const asanaUser = (yield usersApi.getUser(subtask.assignee.gid)).data;
-            if (asanaUser.email === reviewerGidOrEmail ||
-                asanaUser.gid === reviewerGidOrEmail) {
+            if (asanaUser.email === assigneeGidOrEmail ||
+                asanaUser.gid === assigneeGidOrEmail) {
                 (0, core_1.info)(`Found existing review task for ${subtask.gid} and ${asanaUser.email}`);
-                reviewSubtask = subtask;
-                break;
+                return subtask;
             }
         }
+        return undefined;
+    });
+}
+function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfCompleted = true) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const payload = github_1.context.payload;
+        const title = payload.pull_request.title;
+        const githubAuthor = payload.pull_request.user.login;
+        const author = (yield (0, user_map_1.getUserFromLogin)(githubAuthor)) || githubAuthor;
+        const reviewerGidOrEmail = yield resolveReviewer(reviewer);
+        if (reviewerGidOrEmail === null) {
+            return null;
+        }
+        let reviewSubtask = yield findSubtaskForAssignee(subtasks, reviewerGidOrEmail);
         (0, core_1.info)(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`);
         const taskFollowers = [reviewerGidOrEmail];
         if (author !== undefined &&
@@ -85,12 +188,15 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfComplet
         const requesterName = /^[0-9]+$/.exec(author || '') !== null
             ? `<a data-asana-gid="${author}" />`
             : author;
+        const closingNote = REVIEW_TASKS_AS_APPROVALS
+            ? `* This task's approval status will be set automatically from your review in Github`
+            : `* This task will be automatically closed when the review is completed in Github`;
         const subtaskObj = {
             name: `Review Request: ${title}`,
             html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
-* This task will be automatically closed when the review is completed in Github
+${closingNote}
 
 See parent task for more information</body>`,
             assignee: reviewerGidOrEmail,
@@ -99,8 +205,7 @@ See parent task for more information</body>`,
         if (!reviewSubtask) {
             (0, core_1.info)(`Author: ${author}`);
             (0, core_1.info)(`Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`);
-            (0, core_1.info)(`Creating new subtask can fail when too many subtasks are nested!`);
-            reviewSubtask = (yield exports.tasksApi.createSubtaskForTask({ data: subtaskObj }, taskId)).data;
+            reviewSubtask = yield createReviewSubtask(taskId, subtaskObj);
         }
         else if (!reviewSubtask.completed) {
             (0, core_1.info)(`Review subtask for ${reviewer} is already open`);
@@ -108,7 +213,7 @@ See parent task for more information</body>`,
         else if (reopenIfCompleted) {
             (0, core_1.info)(`Reopening a review subtask for ${reviewer}`);
             // TODO add a comment?
-            yield exports.tasksApi.updateTask({ data: { completed: false } }, reviewSubtask.gid);
+            yield setReviewOutcome(reviewSubtask, 'pending');
         }
         else {
             (0, core_1.info)(`Leaving the completed review subtask for ${reviewer} as it is`);
@@ -147,24 +252,47 @@ function updateReviewSubTasks(taskId) {
         }
         else if (github_1.context.eventName === 'pull_request_review') {
             const reviewPayload = github_1.context.payload;
-            if (reviewPayload.action === 'submitted' &&
-                reviewPayload.review.state === 'approved') {
-                const reviewer = reviewPayload.review.user;
-                (0, core_1.info)(`PR approved by ${reviewer.login}. Updating review subtask.`);
-                const subtask = yield createOrReopenReviewSubtask(taskId, reviewer.login, subtasks);
-                if (subtask !== null) {
-                    (0, core_1.info)(`Completing review subtask for ${reviewer.login}: ${subtask.gid}`);
-                    yield exports.tasksApi.updateTask({ data: { completed: true } }, subtask.gid);
+            const reviewer = reviewPayload.review.user;
+            const outcome = (0, approvals_1.outcomeForReview)(reviewPayload.action, reviewPayload.review.state);
+            (0, core_1.info)(`Review ${reviewPayload.action} by ${reviewer.login} (${reviewPayload.review.state}) -> ${outcome}`);
+            if (outcome === 'pending') {
+                // Nothing was decided - a comment, or a review that was dismissed. Only
+                // an approval task can express "your review is outstanding again"; a
+                // plain review subtask keeps the behaviour it has always had, where an
+                // approval is the only thing that closes it.
+                const reviewerGidOrEmail = yield resolveReviewer(reviewer.login);
+                if (reviewerGidOrEmail === null) {
+                    return;
                 }
+                const subtask = yield findSubtaskForAssignee(subtasks, reviewerGidOrEmail);
+                if ((subtask === null || subtask === void 0 ? void 0 : subtask.resource_subtype) === 'approval' && subtask.completed) {
+                    yield setReviewOutcome(subtask, 'pending');
+                }
+                return;
+            }
+            const subtask = yield createOrReopenReviewSubtask(taskId, reviewer.login, subtasks);
+            if (subtask !== null) {
+                yield setReviewOutcome(subtask, outcome);
             }
         }
     });
 }
 function closeSubtasks(taskId) {
     return __awaiter(this, void 0, void 0, function* () {
-        const subtasks = (yield exports.tasksApi.getSubtasksForTask(taskId)).data;
+        // resource_subtype decides how each subtask's verdict is written, and
+        // completed decides whether it still needs one.
+        const subtasks = (yield exports.tasksApi.getSubtasksForTask(taskId, {
+            opt_fields: 'resource_subtype,completed'
+        })).data;
         for (const subtask of subtasks) {
-            yield exports.tasksApi.updateTask({ data: { completed: true } }, subtask.gid);
+            if (subtask.completed) {
+                // A review that already has a verdict keeps it. Completing an Asana
+                // approval forces its status to `approved`, which would otherwise
+                // overwrite a reviewer's "changes requested".
+                (0, core_1.info)(`Subtask ${subtask.gid} is already completed. Leaving it alone`);
+                continue;
+            }
+            yield setReviewOutcome(subtask, 'approved');
         }
     });
 }
@@ -321,7 +449,7 @@ ${truncatedBody}`;
             if (['closed'].includes(payload.pull_request.state)) {
                 (0, core_1.info)(`Pull request closed. Closing any remaining subtasks`);
                 // Close any remaining review tasks when PR is merged
-                closeSubtasks(taskId);
+                yield closeSubtasks(taskId);
                 // Unless the task is in specific projects automatically close
                 closeTask = true;
                 (0, core_1.info)(`Considering whether to close PR task itself...`);

@@ -32,6 +32,9 @@ inputs:
   INCLUDE_ASSIGNEES:
     required: false
     description: "If 'true', review subtasks are created for the union of the PR's assignees and its requested reviewers, instead of for requested reviewers only."
+  REVIEW_TASKS_AS_APPROVALS:
+    required: false
+    description: "If 'true', new review subtasks are created as Asana approval tasks, and their approval status is set from the Github review: Approved, Changes Requested, or back to pending. Requires an Asana plan that supports approvals. Review subtasks created before this was enabled are never converted."
 outputs:
   task_url:
     description: URL of created/updated PR review task
