@@ -96,6 +96,73 @@ describe('review subtask creation with REVIEW_TASKS_AS_APPROVALS', () => {
     expect(fallbackScope.isDone()).toBe(true)
   })
 
+  const twoReviewerCases = [
+    {
+      description: 'keeps trying for later reviewers after a transient failure',
+      status: 429,
+      secondReviewerGetsApproval: true
+    },
+    {
+      description: 'stops trying once a create is refused outright',
+      status: 400,
+      secondReviewerGetsApproval: false
+    }
+  ]
+
+  it.each(twoReviewerCases)(
+    '$description',
+    async ({status, secondReviewerGetsApproval}) => {
+      const taskGid = '8330'
+      mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+      mockSubtasks(taskGid, [])
+      // getReviewerLogins() reads the PR's current state, so both users get a
+      // subtask from this one event.
+      const payload = {
+        ...REVIEW_REQUESTED_EVENT,
+        pull_request: {
+          ...REVIEW_REQUESTED_EVENT.pull_request,
+          assignees: [{login: 'alice'}],
+          requested_reviewers: [{login: 'reviewer-bot'}]
+        }
+      }
+      const failedScope = mockAddSubtaskFails(taskGid, status)
+      // alice's fallback.
+      mockAddSubtask(
+        taskGid,
+        data => data.assignee === 'alice@example.com',
+        makeSubtask({gid: '8331'})
+      )
+      const secondReviewerScope = mockAddSubtask(
+        taskGid,
+        data => {
+          expect(data.assignee).toBe('reviewer@example.com')
+          expect(data.resource_subtype).toBe(
+            secondReviewerGetsApproval ? 'approval' : undefined
+          )
+          return true
+        },
+        makeSubtask({gid: '8332'})
+      )
+
+      const {setFailed} = await runAction({
+        eventName: 'pull_request',
+        payload,
+        inputs: {
+          ...APPROVALS_ON,
+          INCLUDE_ASSIGNEES: 'true',
+          USER_MAP: JSON.stringify({
+            alice: 'alice@example.com',
+            'reviewer-bot': 'reviewer@example.com'
+          })
+        }
+      })
+
+      expect(setFailed).not.toHaveBeenCalled()
+      expect(failedScope.isDone()).toBe(true)
+      expect(secondReviewerScope.isDone()).toBe(true)
+    }
+  )
+
   it('creates a plain subtask when the option is off', async () => {
     const taskGid = '8320'
     mockPRTaskLookup(taskGid, CUSTOM_FIELDS)

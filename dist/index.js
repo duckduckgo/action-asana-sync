@@ -108,8 +108,20 @@ function setReviewOutcome(subtask, outcome) {
     });
 }
 // Whether this Asana plan supports approvals is a property of the workspace, so
-// one rejected create is enough to know the rest will be rejected too.
+// once a create has been refused for that reason, the rest of this run can skip
+// straight to creating plain tasks.
 let approvalsUnsupported = false;
+/**
+ * Whether a failed create tells us approvals will never be accepted, as opposed
+ * to "not right now". A rate limit or a server error says nothing about the
+ * plan, and must not make the rest of the run give up on approvals: nothing
+ * converts a plain subtask afterwards, so those reviewers would lose approval
+ * status for the whole PR.
+ */
+function meansApprovalsUnsupported(e) {
+    const status = e.status;
+    return status !== undefined && status >= 400 && status < 500 && status !== 429;
+}
 /**
  * Creates a review subtask, as an approval task where that is enabled.
  * Approvals need an Asana plan that supports them, so a rejected create is
@@ -129,7 +141,9 @@ function createReviewSubtask(taskId, subtaskObj, approvalHtmlNotes) {
         catch (e) {
             (0, core_1.info)(`Creating an approval subtask failed: ${e}`);
             (0, core_1.info)(`Retrying as a plain task. Does this Asana plan support approvals?`);
-            approvalsUnsupported = true;
+            if (meansApprovalsUnsupported(e)) {
+                approvalsUnsupported = true;
+            }
             return create(subtaskObj);
         }
     });
