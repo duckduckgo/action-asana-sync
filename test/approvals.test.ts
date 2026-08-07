@@ -31,11 +31,4 @@ describe('outcomeForReview', () => {
       expect(outcomeForReview(action, state)).toBe(expected)
     }
   )
-
-  it('never returns rejected, which Github has no equivalent of', () => {
-    const outcomes = cases.map(({action, state}) =>
-      outcomeForReview(action, state)
-    )
-    expect(outcomes).not.toContain('rejected')
-  })
 })

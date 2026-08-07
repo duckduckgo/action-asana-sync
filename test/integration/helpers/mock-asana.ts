@@ -1,5 +1,8 @@
 import nock from 'nock'
 
+import {makeSubtask, makeTask, makeUser} from '../fixtures/asana/factories'
+import {WORKSPACE_ID} from './harness'
+
 // The `asana` client (npm package) talks plain REST+JSON to this base URL
 // via `superagent`, which rides on Node's core http/https modules -- so
 // nock can intercept it transparently. Endpoints below were confirmed by
@@ -127,4 +130,57 @@ export function mockAddSubtaskFails(taskGid: string, status = 400): nock.Scope {
 
 export function mockFindUserById(userGid: string, user: unknown): nock.Scope {
   return mockGet(`${API}/users/${userGid}`, user)
+}
+
+/**
+ * Mocks the custom-field and search lookups every run makes to find the PR's own
+ * Asana task, and returns the scope for the update it finishes with, so a caller
+ * that cares can pass a matcher and assert on it.
+ */
+export function mockPRTaskLookup(
+  taskGid: string,
+  customFields: unknown[],
+  updateMatcher: (data: JSONBody) => boolean = () => true
+): nock.Scope {
+  mockCustomFields(WORKSPACE_ID, customFields)
+  mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
+  return mockUpdateTask(taskGid, updateMatcher)
+}
+
+/**
+ * Mocks an existing review subtask assigned to a reviewer, wiring up the
+ * subtask-listing, task and user lookups the action walks to match a subtask to
+ * that reviewer.
+ */
+export function mockExistingReviewSubtask(
+  taskGid: string,
+  {
+    subtaskGid,
+    userGid,
+    email = 'reviewer@example.com',
+    ...overrides
+  }: {
+    subtaskGid: string
+    userGid: string
+    email?: string
+    [field: string]: unknown
+  }
+): void {
+  const subtask = makeSubtask({
+    gid: subtaskGid,
+    assignee: {gid: userGid},
+    ...overrides
+  })
+  mockSubtasks(taskGid, [subtask])
+  mockFindTaskById(subtaskGid, subtask)
+  mockFindUserById(userGid, makeUser({gid: userGid, email}))
+}
+
+/**
+ * Registers an update that must never be called: nock's disableNetConnect turns
+ * an unmocked request into a failure rather than the assertion we want, so the
+ * caller asserts `scope.isDone() === false` against this instead.
+ */
+export function mockUpdateTaskNeverCalled(taskGid: string): nock.Scope {
+  return mockUpdateTask(taskGid, () => true)
 }

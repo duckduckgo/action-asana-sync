@@ -1,15 +1,15 @@
 import {runAction, loadFixture} from './helpers/harness'
 import {
-  mockCustomFields,
-  mockSearchTasksInWorkspace,
   mockSubtasks,
   mockAddSubtask,
   mockAddSubtaskFails,
+  mockExistingReviewSubtask,
   mockFindTaskById,
-  mockFindUserById,
-  mockUpdateTask
+  mockPRTaskLookup,
+  mockUpdateTask,
+  mockUpdateTaskNeverCalled
 } from './helpers/mock-asana'
-import {makeTask, makeSubtask, makeUser} from './fixtures/asana/factories'
+import {makeSubtask, makeTask} from './fixtures/asana/factories'
 import './setup'
 
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
@@ -19,57 +19,30 @@ const REVIEW_REQUESTED_EVENT = loadFixture(
 const APPROVED_EVENT = loadFixture(
   'fixtures/events/pull_request_review.submitted.approved.json'
 )
-const CHANGES_REQUESTED_EVENT = loadFixture(
-  'fixtures/events/pull_request_review.submitted.changes_requested.json'
-)
-const COMMENTED_EVENT = loadFixture(
-  'fixtures/events/pull_request_review.submitted.commented.json'
-)
-const DISMISSED_EVENT = loadFixture(
-  'fixtures/events/pull_request_review.dismissed.json'
-)
 const CLOSED_EVENT = loadFixture(
   'fixtures/events/pull_request.closed.merged.json'
 )
 
-const WORKSPACE_ID = '1000'
+/** The approved-review fixture with a different action/verdict on it. */
+function reviewEvent(action: string, state: string): unknown {
+  return {
+    ...APPROVED_EVENT,
+    action,
+    review: {...APPROVED_EVENT.review, state}
+  }
+}
+
+const CHANGES_REQUESTED_EVENT = reviewEvent('submitted', 'changes_requested')
+const COMMENTED_EVENT = reviewEvent('submitted', 'commented')
+const DISMISSED_EVENT = reviewEvent('dismissed', 'dismissed')
+
 const USER_MAP = JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
 const APPROVALS_ON = {REVIEW_TASKS_AS_APPROVALS: 'true', USER_MAP}
-
-/** Mocks the lookup+update of the PR's own Asana task, shared by every case below. */
-function mockBaseTaskLookup(taskGid: string): void {
-  mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
-  mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
-  mockUpdateTask(taskGid, () => true)
-}
-
-/**
- * Mocks an existing review subtask assigned to reviewer-bot, wiring up the
- * lookups createOrReopenReviewSubtask() makes to match it to that reviewer.
- */
-function mockExistingReviewSubtask(
-  taskGid: string,
-  subtaskGid: string,
-  userGid: string,
-  overrides: Record<string, unknown>
-): void {
-  const subtask = makeSubtask({
-    gid: subtaskGid,
-    assignee: {gid: userGid},
-    ...overrides
-  })
-  mockSubtasks(taskGid, [subtask])
-  mockFindTaskById(subtaskGid, subtask)
-  mockFindUserById(
-    userGid,
-    makeUser({gid: userGid, email: 'reviewer@example.com'})
-  )
-}
 
 describe('review subtask creation with REVIEW_TASKS_AS_APPROVALS', () => {
   it('creates the subtask as a pending approval task', async () => {
     const taskGid = '8300'
-    mockBaseTaskLookup(taskGid)
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
     mockSubtasks(taskGid, [])
     const addSubtaskScope = mockAddSubtask(
       taskGid,
@@ -93,9 +66,9 @@ describe('review subtask creation with REVIEW_TASKS_AS_APPROVALS', () => {
     expect(addSubtaskScope.isDone()).toBe(true)
   })
 
-  it('falls back to a plain subtask when Asana rejects the approval task', async () => {
+  it('falls back to a plain subtask, with plain notes, when Asana rejects the approval', async () => {
     const taskGid = '8310'
-    mockBaseTaskLookup(taskGid)
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
     mockSubtasks(taskGid, [])
     const failedScope = mockAddSubtaskFails(taskGid)
     const fallbackScope = mockAddSubtask(
@@ -104,6 +77,9 @@ describe('review subtask creation with REVIEW_TASKS_AS_APPROVALS', () => {
         expect(data.resource_subtype).toBeUndefined()
         expect(data.approval_status).toBeUndefined()
         expect(data.assignee).toBe('reviewer@example.com')
+        // The approval wording must not survive onto a plain task.
+        expect(data.html_notes).toContain('automatically closed')
+        expect(data.html_notes).not.toContain('approval status')
         return true
       },
       makeSubtask({gid: '8311'})
@@ -122,7 +98,7 @@ describe('review subtask creation with REVIEW_TASKS_AS_APPROVALS', () => {
 
   it('creates a plain subtask when the option is off', async () => {
     const taskGid = '8320'
-    mockBaseTaskLookup(taskGid)
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
     mockSubtasks(taskGid, [])
     const addSubtaskScope = mockAddSubtask(
       taskGid,
@@ -160,19 +136,24 @@ describe('review verdicts on an approval subtask', () => {
   ]
 
   it.each(verdictCases)(
-    'records $description as $approvalStatus',
+    'records $description as $approvalStatus in a single write',
     async ({payload, approvalStatus}) => {
       const taskGid = '8400'
-      mockBaseTaskLookup(taskGid)
-      mockExistingReviewSubtask(taskGid, '8401', '9700', {
+      mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+      mockExistingReviewSubtask(taskGid, {
+        subtaskGid: '8401',
+        userGid: '9700',
         resource_subtype: 'approval',
-        completed: false
+        // Already decided: the verdict must not flap through pending first.
+        completed: true
       })
       const verdictScope = mockUpdateTask('8401', data => {
         expect(data.approval_status).toBe(approvalStatus)
         expect(data.completed).toBe(true)
         return true
       })
+      // Consumed only by a second write, which there should not be.
+      const extraWriteScope = mockUpdateTaskNeverCalled('8401')
 
       const {setFailed} = await runAction({
         eventName: 'pull_request_review',
@@ -182,6 +163,7 @@ describe('review verdicts on an approval subtask', () => {
 
       expect(setFailed).not.toHaveBeenCalled()
       expect(verdictScope.isDone()).toBe(true)
+      expect(extraWriteScope.isDone()).toBe(false)
     }
   )
 
@@ -191,11 +173,13 @@ describe('review verdicts on an approval subtask', () => {
   ]
 
   it.each(pendingCases)(
-    'puts the approval back to pending for $description',
+    'puts a decided approval back to pending for $description',
     async ({payload}) => {
       const taskGid = '8410'
-      mockBaseTaskLookup(taskGid)
-      mockExistingReviewSubtask(taskGid, '8411', '9710', {
+      mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+      mockExistingReviewSubtask(taskGid, {
+        subtaskGid: '8411',
+        userGid: '9710',
         resource_subtype: 'approval',
         completed: true
       })
@@ -218,14 +202,14 @@ describe('review verdicts on an approval subtask', () => {
 
   it('leaves an approval that is already pending alone', async () => {
     const taskGid = '8420'
-    mockBaseTaskLookup(taskGid)
-    mockExistingReviewSubtask(taskGid, '8421', '9720', {
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+    mockExistingReviewSubtask(taskGid, {
+      subtaskGid: '8421',
+      userGid: '9720',
       resource_subtype: 'approval',
       completed: false
     })
-    // Registered so an unexpected call succeeds instead of tripping
-    // disableNetConnect; the assertion is that it's never consumed.
-    const updateScope = mockUpdateTask('8421', () => true)
+    const updateScope = mockUpdateTaskNeverCalled('8421')
 
     await runAction({
       eventName: 'pull_request_review',
@@ -240,9 +224,10 @@ describe('review verdicts on an approval subtask', () => {
 describe('review verdicts on a pre-existing plain subtask', () => {
   it('completes it without writing any approval fields', async () => {
     const taskGid = '8500'
-    mockBaseTaskLookup(taskGid)
-    mockExistingReviewSubtask(taskGid, '8501', '9800', {
-      resource_subtype: 'default_task',
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+    mockExistingReviewSubtask(taskGid, {
+      subtaskGid: '8501',
+      userGid: '9800',
       completed: false
     })
     const completeScope = mockUpdateTask('8501', data => {
@@ -255,8 +240,8 @@ describe('review verdicts on a pre-existing plain subtask', () => {
     const {setFailed} = await runAction({
       eventName: 'pull_request_review',
       payload: APPROVED_EVENT,
-      // On, to show the option governs creation only: an existing plain task
-      // is never converted.
+      // On, to show the option governs creation only: an existing plain task is
+      // never converted.
       inputs: APPROVALS_ON
     })
 
@@ -266,14 +251,13 @@ describe('review verdicts on a pre-existing plain subtask', () => {
 
   it('is not reopened by a commented review, as before', async () => {
     const taskGid = '8510'
-    mockBaseTaskLookup(taskGid)
-    mockExistingReviewSubtask(taskGid, '8511', '9810', {
-      resource_subtype: 'default_task',
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+    mockExistingReviewSubtask(taskGid, {
+      subtaskGid: '8511',
+      userGid: '9810',
       completed: true
     })
-    // Registered so an unexpected call succeeds instead of tripping
-    // disableNetConnect; the assertion is that it's never consumed.
-    const updateScope = mockUpdateTask('8511', () => true)
+    const updateScope = mockUpdateTaskNeverCalled('8511')
 
     await runAction({
       eventName: 'pull_request_review',
@@ -288,8 +272,12 @@ describe('review verdicts on a pre-existing plain subtask', () => {
 describe('pull request closed', () => {
   it('approves outstanding approvals, completes plain tasks, keeps verdicts', async () => {
     const taskGid = '8600'
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
-    mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
+    // No REVIEW_TASKS_AS_APPROVALS below: how a subtask is closed follows the
+    // subtask's own type, not the option.
+    const finalUpdate = mockPRTaskLookup(taskGid, CUSTOM_FIELDS, data => {
+      expect(data.completed).toBe(true)
+      return true
+    })
     mockSubtasks(taskGid, [
       makeSubtask({
         gid: '8601',
@@ -304,22 +292,14 @@ describe('pull request closed', () => {
       expect(data.completed).toBe(true)
       return true
     })
-    // Registered so an unexpected call succeeds instead of tripping
-    // disableNetConnect; the assertion is that it's never consumed.
-    const decidedScope = mockUpdateTask('8602', () => true)
+    const decidedScope = mockUpdateTaskNeverCalled('8602')
     const plainScope = mockUpdateTask('8603', data => {
       expect(data.completed).toBe(true)
       expect(data.approval_status).toBeUndefined()
       return true
     })
     mockFindTaskById(taskGid, makeTask({gid: taskGid, memberships: []}))
-    const finalUpdate = mockUpdateTask(taskGid, data => {
-      expect(data.completed).toBe(true)
-      return true
-    })
 
-    // No REVIEW_TASKS_AS_APPROVALS: how a subtask is closed follows the
-    // subtask's own type, not the option.
     const {setFailed} = await runAction({
       eventName: 'pull_request',
       payload: CLOSED_EVENT
