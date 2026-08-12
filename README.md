@@ -50,6 +50,24 @@ behaviour of this Github Action:
 - `SKIPPED_USERS`: Some users don't like receiving reviews in Asana. This is a
   comma separated list of github usernames that will be ignored (replaced with
   dax).
+- `REVIEW_TASKS_AS_APPROVALS`: Set this to `'true'` to create review subtasks as
+  Asana **approval** tasks, so the reviewer's verdict is visible in Asana rather
+  than just "done". An approving review sets the task to *Approved*, a
+  changes-requested review to *Changes Requested*, and a commented or dismissed
+  review puts it back to pending. Requires an Asana plan that supports
+  approvals; if Asana rejects the approval task, the action falls back to
+  creating a plain one. Some details worth knowing:
+  - Only *new* subtasks are affected. Review subtasks created before this was
+    enabled are never converted, and keep behaving as they always have (an
+    approval closes them, nothing else does). How each subtask is updated
+    follows that subtask's own type, so mixed projects are fine and turning the
+    option back off does not break approvals already created.
+  - Asana's *Rejected* status is never used, as Github has no equivalent review
+    state.
+  - Asana ties an approval's status to its completion: a task cannot be
+    completed without becoming *Approved*. So closing a PR marks any review
+    that had not yet been given as *Approved*, rather than leaving reviewers
+    with open tasks on a dead PR.
 - `INCLUDE_ASSIGNEES`: By default a review subtask is only created for users
   added to the PR's *Reviewers*. Set this to `'true'` to create one for the
   union of *Reviewers* and *Assignees* instead, minus the PR author. Useful for

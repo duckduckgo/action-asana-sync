@@ -14,6 +14,7 @@ import {
   PullRequestReviewRequestedEvent
 } from '@octokit/webhooks-types'
 
+import {outcomeForReview, ReviewOutcome} from './approvals'
 import {renderMD} from './markdown'
 import {getReviewerLogins} from './reviewers'
 import {getUserFromLogin} from './user-map'
@@ -37,6 +38,10 @@ interface AsanaTask {
   gid: string
   permalink_url: string
   completed?: boolean
+  // `default_task` for a normal task, `approval` for an approval task. Part of
+  // Asana's compact task representation, so it comes back from subtask
+  // listings, but request it via opt_fields where the value is load-bearing.
+  resource_subtype?: string
   assignee?: {gid: string} | null
   memberships: Array<{project: {gid: string}}>
   custom_fields: Array<{gid: string; display_value: string}>
@@ -73,6 +78,127 @@ const NO_AUTOCLOSE_LIST = NO_AUTOCLOSE_PROJECTS.split(',')
 const ASSIGN_PR_AUTHOR = getInput('ASSIGN_PR_AUTHOR') === 'true'
 // Create review subtasks for assignees as well as for requested reviewers
 const INCLUDE_ASSIGNEES = getInput('INCLUDE_ASSIGNEES') === 'true'
+// Create review subtasks as Asana approval tasks. This only affects tasks we
+// create: how an existing review subtask is updated is decided by that task's
+// own resource_subtype, so review subtasks that predate this option keep the
+// plain completed/not-completed behaviour they were created with.
+const REVIEW_TASKS_AS_APPROVALS =
+  getInput('REVIEW_TASKS_AS_APPROVALS') === 'true'
+
+/**
+ * Records a review verdict on a review subtask.
+ *
+ * For an approval task, `approval_status` and `completed` are the same piece of
+ * state: Asana keeps them in sync, so `changes_requested` completes the task and
+ * completing a task means `approved`. For a plain task there is only
+ * `completed`, which is what this action has always written.
+ */
+async function setReviewOutcome(
+  subtask: AsanaTask,
+  outcome: ReviewOutcome
+): Promise<void> {
+  const completed = outcome !== 'pending'
+  const data =
+    subtask.resource_subtype === 'approval'
+      ? {completed, approval_status: outcome}
+      : {completed}
+  info(`Setting review subtask ${subtask.gid} to ${JSON.stringify(data)}`)
+  await tasksApi.updateTask({data}, subtask.gid)
+}
+
+// Whether this Asana plan supports approvals is a property of the workspace, so
+// once a create has been refused for that reason, the rest of this run can skip
+// straight to creating plain tasks.
+let approvalsUnsupported = false
+
+/**
+ * Whether a failed create tells us approvals will never be accepted, as opposed
+ * to "not right now". A rate limit or a server error says nothing about the
+ * plan, and must not make the rest of the run give up on approvals: nothing
+ * converts a plain subtask afterwards, so those reviewers would lose approval
+ * status for the whole PR.
+ */
+function meansApprovalsUnsupported(e: unknown): boolean {
+  const status = (e as {status?: number}).status
+  return status !== undefined && status >= 400 && status < 500 && status !== 429
+}
+
+/**
+ * Creates a review subtask, as an approval task where that is enabled.
+ * Approvals need an Asana plan that supports them, so a rejected create is
+ * retried as a plain task rather than failing the review sync outright. The
+ * approval wording is only used on a task that really is an approval.
+ */
+async function createReviewSubtask(
+  taskId: string,
+  subtaskObj: Record<string, unknown>,
+  approvalHtmlNotes: string
+): Promise<AsanaTask> {
+  info(`Creating new subtask can fail when too many subtasks are nested!`)
+  const create = async (data: Record<string, unknown>): Promise<AsanaTask> =>
+    (await tasksApi.createSubtaskForTask({data}, taskId)).data
+  if (!REVIEW_TASKS_AS_APPROVALS || approvalsUnsupported) {
+    return create(subtaskObj)
+  }
+  try {
+    return await create({
+      ...subtaskObj,
+      html_notes: approvalHtmlNotes,
+      resource_subtype: 'approval',
+      approval_status: 'pending'
+    })
+  } catch (e) {
+    info(`Creating an approval subtask failed: ${e}`)
+    info(`Retrying as a plain task. Does this Asana plan support approvals?`)
+    if (meansApprovalsUnsupported(e)) {
+      approvalsUnsupported = true
+    }
+    return create(subtaskObj)
+  }
+}
+
+/**
+ * Resolves a Github login to the Asana user (gid or email) whose review task we
+ * should act on, or undefined if this reviewer should be skipped.
+ */
+async function resolveReviewer(reviewer: string): Promise<string | undefined> {
+  const reviewerGidOrEmail = await getUserFromLogin(reviewer)
+  info(`Resolved reviewer ${reviewer} to ${reviewerGidOrEmail}`)
+  if (
+    SKIPPED_USERS_LIST.includes(reviewer) ||
+    reviewerGidOrEmail === undefined
+  ) {
+    info(`Skipping ${reviewer} - unmapped, or a member of SKIPPED_USERS`)
+    return undefined
+  }
+  return reviewerGidOrEmail
+}
+
+/** Finds the subtask assigned to the given Asana user, if there is one. */
+async function findSubtaskForAssignee(
+  subtasks: AsanaTask[],
+  assigneeGidOrEmail: string
+): Promise<AsanaTask | undefined> {
+  for (let subtask of subtasks) {
+    info(`Checking subtask ${subtask.gid} assignee`)
+    subtask = (await tasksApi.getTask(subtask.gid)).data
+    if (!subtask.assignee) {
+      info(`Task ${subtask.gid} has no assignee`)
+      continue
+    }
+    const asanaUser = (await usersApi.getUser(subtask.assignee.gid)).data
+    if (
+      asanaUser.email === assigneeGidOrEmail ||
+      asanaUser.gid === assigneeGidOrEmail
+    ) {
+      info(
+        `Found existing review task for ${subtask.gid} and ${asanaUser.email}`
+      )
+      return subtask
+    }
+  }
+  return undefined
+}
 
 export async function createOrReopenReviewSubtask(
   taskId: string,
@@ -84,38 +210,12 @@ export async function createOrReopenReviewSubtask(
   const title = payload.pull_request.title
   const githubAuthor = payload.pull_request.user.login
   const author = (await getUserFromLogin(githubAuthor)) || githubAuthor
-  const reviewerGidOrEmail = await getUserFromLogin(reviewer)
-  info(`Review requested from ${reviewer} (${reviewerGidOrEmail})`)
-  if (
-    SKIPPED_USERS_LIST.includes(reviewer) ||
-    reviewerGidOrEmail === undefined
-  ) {
-    info(
-      `Skipping review subtask creation for ${reviewer} - member of SKIPPED_USERS`
-    )
+  const reviewerGidOrEmail = await resolveReviewer(reviewer)
+  if (!reviewerGidOrEmail) {
     return null
   }
 
-  let reviewSubtask
-  for (let subtask of subtasks) {
-    info(`Checking subtask ${subtask.gid} assignee`)
-    subtask = (await tasksApi.getTask(subtask.gid)).data
-    if (!subtask.assignee) {
-      info(`Task ${subtask.gid} has no assignee`)
-      continue
-    }
-    const asanaUser = (await usersApi.getUser(subtask.assignee.gid)).data
-    if (
-      asanaUser.email === reviewerGidOrEmail ||
-      asanaUser.gid === reviewerGidOrEmail
-    ) {
-      info(
-        `Found existing review task for ${subtask.gid} and ${asanaUser.email}`
-      )
-      reviewSubtask = subtask
-      break
-    }
-  }
+  let reviewSubtask = await findSubtaskForAssignee(subtasks, reviewerGidOrEmail)
   info(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`)
   const taskFollowers = [reviewerGidOrEmail]
   if (
@@ -128,14 +228,18 @@ export async function createOrReopenReviewSubtask(
     /^[0-9]+$/.exec(author || '') !== null
       ? `<a data-asana-gid="${author}" />`
       : author
-  const subtaskObj = {
-    name: `Review Request: ${title}`,
-    html_notes: `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
+  const htmlNotes = (closingNote: string): string =>
+    `<body>${requesterName} requested your code review of <a href="${payload.pull_request.html_url}">${payload.pull_request.html_url}</a>.
 
 NOTE:
-* This task will be automatically closed when the review is completed in Github
+${closingNote}
 
-See parent task for more information</body>`,
+See parent task for more information</body>`
+  const subtaskObj = {
+    name: `Review Request: ${title}`,
+    html_notes: htmlNotes(
+      `* This task will be automatically closed when the review is completed in Github`
+    ),
     assignee: reviewerGidOrEmail,
     followers: taskFollowers
   }
@@ -144,16 +248,19 @@ See parent task for more information</body>`,
     info(
       `Creating review subtask for ${reviewer}: ${JSON.stringify(subtaskObj)}`
     )
-    info(`Creating new subtask can fail when too many subtasks are nested!`)
-    reviewSubtask = (
-      await tasksApi.createSubtaskForTask({data: subtaskObj}, taskId)
-    ).data
+    reviewSubtask = await createReviewSubtask(
+      taskId,
+      subtaskObj,
+      htmlNotes(
+        `* This task's approval status will be set automatically from your review in Github`
+      )
+    )
   } else if (!reviewSubtask.completed) {
     info(`Review subtask for ${reviewer} is already open`)
   } else if (reopenIfCompleted) {
     info(`Reopening a review subtask for ${reviewer}`)
     // TODO add a comment?
-    await tasksApi.updateTask({data: {completed: false}}, reviewSubtask.gid)
+    await setReviewOutcome(reviewSubtask, 'pending')
   } else {
     info(`Leaving the completed review subtask for ${reviewer} as it is`)
   }
@@ -163,7 +270,13 @@ See parent task for more information</body>`,
 async function updateReviewSubTasks(taskId: string): Promise<void> {
   info(`Creating/updating review subtasks for task ${taskId}`)
   const payload = context.payload as PullRequestEvent
-  const subtasks = (await tasksApi.getSubtasksForTask(taskId)).data
+  // resource_subtype and completed are what decide whether a subtask can record
+  // a given outcome, so read them with the listing rather than per subtask.
+  const subtasks = (
+    await tasksApi.getSubtasksForTask(taskId, {
+      opt_fields: 'resource_subtype,completed'
+    })
+  ).data as AsanaTask[]
   if (
     context.eventName === 'pull_request' ||
     context.eventName === 'pull_request_target'
@@ -195,30 +308,75 @@ async function updateReviewSubTasks(taskId: string): Promise<void> {
     }
   } else if (context.eventName === 'pull_request_review') {
     const reviewPayload = context.payload as PullRequestReviewEvent
-    if (
-      reviewPayload.action === 'submitted' &&
-      reviewPayload.review.state === 'approved'
-    ) {
-      const reviewer = reviewPayload.review.user
-      info(`PR approved by ${reviewer.login}. Updating review subtask.`)
-      const subtask = await createOrReopenReviewSubtask(
-        taskId,
-        reviewer.login,
-        subtasks
+    const reviewer = reviewPayload.review.user
+    const outcome = outcomeForReview(
+      reviewPayload.action,
+      reviewPayload.review.state
+    )
+    info(
+      `Review ${reviewPayload.action} by ${reviewer.login} (${reviewPayload.review.state}) -> ${outcome}`
+    )
+    if (outcome === 'pending') {
+      // Nothing was decided - a comment, or a review that was dismissed. Only a
+      // decided approval task can go back to being outstanding: a plain review
+      // subtask keeps the behaviour it has always had, where an approval is the
+      // only thing that closes it, and nothing is created for a non-verdict.
+      // Narrowing the candidates first also keeps the common case - a comment on
+      // a project with no approvals - down to no extra requests at all.
+      const decidedApprovals = subtasks.filter(
+        subtask => subtask.resource_subtype === 'approval' && subtask.completed
       )
-      if (subtask !== null) {
-        info(`Completing review subtask for ${reviewer.login}: ${subtask.gid}`)
-        await tasksApi.updateTask({data: {completed: true}}, subtask.gid)
+      if (decidedApprovals.length === 0) {
+        info(`No decided approval subtask to reopen`)
+        return
       }
+      const reviewerGidOrEmail = await resolveReviewer(reviewer.login)
+      if (!reviewerGidOrEmail) {
+        return
+      }
+      const subtask = await findSubtaskForAssignee(
+        decidedApprovals,
+        reviewerGidOrEmail
+      )
+      if (subtask) {
+        await setReviewOutcome(subtask, 'pending')
+      }
+      return
+    }
+    // The verdict below is the only write this needs, so don't let the
+    // find-or-create reopen the task first: that would cost a second request and
+    // flap the reviewer's approval through `pending` on its way to the verdict.
+    const subtask = await createOrReopenReviewSubtask(
+      taskId,
+      reviewer.login,
+      subtasks,
+      false
+    )
+    if (subtask !== null) {
+      await setReviewOutcome(subtask, outcome)
     }
   }
 }
 
+// Asana will not let an approval task be completed without its status becoming
+// `approved`, so this is what closing an outstanding review has to write.
+const OUTCOME_ON_PR_CLOSE: ReviewOutcome = 'approved'
+
 async function closeSubtasks(taskId: string) {
-  const subtasks = (await tasksApi.getSubtasksForTask(taskId)).data
+  const subtasks = (
+    await tasksApi.getSubtasksForTask(taskId, {
+      opt_fields: 'resource_subtype,completed'
+    })
+  ).data as AsanaTask[]
 
   for (const subtask of subtasks) {
-    await tasksApi.updateTask({data: {completed: true}}, subtask.gid)
+    if (subtask.completed) {
+      // A review that already has a verdict keeps it: completing it again would
+      // overwrite a reviewer's "changes requested" with `approved`.
+      info(`Subtask ${subtask.gid} is already completed. Leaving it alone`)
+      continue
+    }
+    await setReviewOutcome(subtask, OUTCOME_ON_PR_CLOSE)
   }
 }
 
@@ -409,7 +567,7 @@ ${truncatedBody}`
     if (['closed'].includes(payload.pull_request.state)) {
       info(`Pull request closed. Closing any remaining subtasks`)
       // Close any remaining review tasks when PR is merged
-      closeSubtasks(taskId)
+      await closeSubtasks(taskId)
 
       // Unless the task is in specific projects automatically close
       closeTask = true

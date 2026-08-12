@@ -21,10 +21,13 @@ export function makeUser(overrides: Overrides): Overrides {
   }
 }
 
+// Defaults to a plain task: an approval subtask only exists where a test (or
+// the action, with REVIEW_TASKS_AS_APPROVALS on) has created one.
 export function makeSubtask(overrides: Overrides): Overrides {
   return {
     assignee: null,
     completed: false,
+    resource_subtype: 'default_task',
     ...overrides
   }
 }

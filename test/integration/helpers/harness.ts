@@ -2,9 +2,12 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
+/** The workspace every test runs against, and mocks Asana calls for. */
+export const WORKSPACE_ID = '1000'
+
 const DEFAULT_INPUTS: Record<string, string> = {
   ASANA_ACCESS_TOKEN: 'test-asana-token',
-  ASANA_WORKSPACE_ID: '1000',
+  ASANA_WORKSPACE_ID: WORKSPACE_ID,
   ASANA_PROJECT_ID: '2000',
   SKIPPED_USERS: '',
   NO_AUTOCLOSE_PROJECTS: '',
