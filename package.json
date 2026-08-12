@@ -38,7 +38,7 @@
     "@types/jest": "^27.5.2",
     "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^13.0.7",
-    "@types/node": "^20.11.25",
+    "@types/node": "^26.2.0",
     "@vercel/ncc": "^0.38.1",
     "eslint": "^9.39.5",
     "eslint-plugin-jest": "^29.16.0",
