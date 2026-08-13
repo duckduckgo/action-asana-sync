@@ -149,7 +149,6 @@ asana_1.ApiClient.instance.defaultHeaders = {
 // single retry-on-429 wrapper here covers all of them.
 (0, asana_retry_1.installAsanaRateLimitBackoff)();
 exports.tasksApi = new asana_1.TasksApi();
-const usersApi = new asana_1.UsersApi();
 const customFieldsApi = new asana_1.CustomFieldsApi();
 const sectionsApi = new asana_1.SectionsApi();
 const ASANA_WORKSPACE_ID = (0, core_1.getInput)('ASANA_WORKSPACE_ID', { required: true });
@@ -255,25 +254,23 @@ function resolveReviewer(reviewer) {
         return reviewerGidOrEmail;
     });
 }
-/** Finds the subtask assigned to the given Asana user, if there is one. */
+/**
+ * Finds the subtask assigned to the given Asana user, if there is one.
+ * Relies on the caller having fetched `assignee` (and `assignee.email`) up
+ * front via opt_fields on the subtask listing - the assignee a subtask
+ * search would otherwise need a `getTask` and a `getUser` call per subtask
+ * to learn.
+ */
 function findSubtaskForAssignee(subtasks, assigneeGidOrEmail) {
-    return __awaiter(this, void 0, void 0, function* () {
-        for (let subtask of subtasks) {
-            (0, core_1.info)(`Checking subtask ${subtask.gid} assignee`);
-            subtask = (yield exports.tasksApi.getTask(subtask.gid)).data;
-            if (!subtask.assignee) {
-                (0, core_1.info)(`Task ${subtask.gid} has no assignee`);
-                continue;
-            }
-            const asanaUser = (yield usersApi.getUser(subtask.assignee.gid)).data;
-            if (asanaUser.email === assigneeGidOrEmail ||
-                asanaUser.gid === assigneeGidOrEmail) {
-                (0, core_1.info)(`Found existing review task for ${subtask.gid} and ${asanaUser.email}`);
-                return subtask;
-            }
-        }
-        return undefined;
+    const subtask = subtasks.find(s => {
+        var _a, _b;
+        return ((_a = s.assignee) === null || _a === void 0 ? void 0 : _a.gid) === assigneeGidOrEmail ||
+            ((_b = s.assignee) === null || _b === void 0 ? void 0 : _b.email) === assigneeGidOrEmail;
     });
+    if (subtask) {
+        (0, core_1.info)(`Found existing review task ${subtask.gid} for ${assigneeGidOrEmail}`);
+    }
+    return subtask;
 }
 function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfCompleted = true) {
     return __awaiter(this, void 0, void 0, function* () {
@@ -285,7 +282,7 @@ function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfComplet
         if (!reviewerGidOrEmail) {
             return null;
         }
-        let reviewSubtask = yield findSubtaskForAssignee(subtasks, reviewerGidOrEmail);
+        let reviewSubtask = findSubtaskForAssignee(subtasks, reviewerGidOrEmail);
         (0, core_1.info)(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`);
         const taskFollowers = [reviewerGidOrEmail];
         if (author !== undefined &&
@@ -331,10 +328,13 @@ function updateReviewSubTasks(taskId) {
     return __awaiter(this, void 0, void 0, function* () {
         (0, core_1.info)(`Creating/updating review subtasks for task ${taskId}`);
         const payload = github_1.context.payload;
-        // resource_subtype and completed are what decide whether a subtask can record
-        // a given outcome, so read them with the listing rather than per subtask.
+        // resource_subtype and completed are what decide whether a subtask can
+        // record a given outcome, and assignee/assignee.email are what
+        // findSubtaskForAssignee() matches a reviewer against - reading all of
+        // them with the listing avoids a getTask+getUser call per subtask to look
+        // each one up individually.
         const subtasks = (yield exports.tasksApi.getSubtasksForTask(taskId, {
-            opt_fields: 'resource_subtype,completed'
+            opt_fields: 'resource_subtype,completed,assignee,assignee.email'
         })).data;
         if (github_1.context.eventName === 'pull_request' ||
             github_1.context.eventName === 'pull_request_target') {
@@ -380,7 +380,7 @@ function updateReviewSubTasks(taskId) {
                 if (!reviewerGidOrEmail) {
                     return;
                 }
-                const subtask = yield findSubtaskForAssignee(decidedApprovals, reviewerGidOrEmail);
+                const subtask = findSubtaskForAssignee(decidedApprovals, reviewerGidOrEmail);
                 if (subtask) {
                     yield setReviewOutcome(subtask, 'pending');
                 }

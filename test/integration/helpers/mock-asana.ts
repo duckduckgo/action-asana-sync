@@ -1,6 +1,6 @@
 import nock from 'nock'
 
-import {makeSubtask, makeTask, makeUser} from '../fixtures/asana/factories'
+import {makeSubtask, makeTask} from '../fixtures/asana/factories'
 import {WORKSPACE_ID} from './harness'
 
 // The `asana` client (npm package) talks plain REST+JSON to this base URL
@@ -152,10 +152,6 @@ export function mockAddSubtaskFails(taskGid: string, status = 400): nock.Scope {
     .reply(status, {errors: [{message: 'subtask creation failed'}]})
 }
 
-export function mockFindUserById(userGid: string, user: unknown): nock.Scope {
-  return mockGet(`${API}/users/${userGid}`, user)
-}
-
 /**
  * Mocks the custom-field and search lookups every run makes to find the PR's own
  * Asana task, and returns the scope for the update it finishes with, so a caller
@@ -173,8 +169,9 @@ export function mockPRTaskLookup(
 
 /**
  * Mocks an existing review subtask assigned to a reviewer, wiring up the
- * subtask-listing, task and user lookups the action walks to match a subtask to
- * that reviewer.
+ * subtask-listing lookup the action matches a subtask to that reviewer
+ * against (assignee gid/email come back with the listing itself, via
+ * opt_fields, rather than a separate per-subtask lookup).
  */
 export function mockExistingReviewSubtask(
   taskGid: string,
@@ -192,12 +189,10 @@ export function mockExistingReviewSubtask(
 ): void {
   const subtask = makeSubtask({
     gid: subtaskGid,
-    assignee: {gid: userGid},
+    assignee: {gid: userGid, email},
     ...overrides
   })
   mockSubtasks(taskGid, [subtask])
-  mockFindTaskById(subtaskGid, subtask)
-  mockFindUserById(userGid, makeUser({gid: userGid, email}))
 }
 
 /**

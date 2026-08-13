@@ -234,4 +234,39 @@ describe('review approved', () => {
 
     expect(completeScope.isDone()).toBe(true)
   })
+
+  it('matches the right subtask among several from the listing alone, with no per-subtask lookups', async () => {
+    // Neither subtask's gid/assignee is fetched individually: nock has no
+    // interceptors registered for /tasks/{gid} or /users/{gid} here, so the
+    // action must be matching purely off what getSubtasksForTask returned.
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+    const otherSubtask = makeSubtask({
+      gid: '8103',
+      assignee: {gid: '9601', email: 'someone-else@example.com'},
+      completed: true
+    })
+    const reviewerSubtask = makeSubtask({
+      gid: '8104',
+      assignee: {gid: '9602', email: 'reviewer@example.com'},
+      completed: true
+    })
+    mockSubtasks(taskGid, [otherSubtask, reviewerSubtask])
+    const completeScope = mockUpdateTask('8104', data => {
+      expect(data.completed).toBe(true)
+      return true
+    })
+    const wrongScope = mockUpdateTaskNeverCalled('8103')
+
+    const {setFailed} = await runAction({
+      eventName: 'pull_request_review',
+      payload: REVIEW_APPROVED_EVENT,
+      inputs: {
+        USER_MAP: JSON.stringify({'reviewer-bot': 'reviewer@example.com'})
+      }
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(completeScope.isDone()).toBe(true)
+    expect(wrongScope.isDone()).toBe(false)
+  })
 })
