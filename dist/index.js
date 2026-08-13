@@ -94,17 +94,28 @@ const REVIEW_TASKS_AS_APPROVALS = (0, core_1.getInput)('REVIEW_TASKS_AS_APPROVAL
  *
  * For an approval task, `approval_status` and `completed` are the same piece of
  * state: Asana keeps them in sync, so `changes_requested` completes the task and
- * completing a task means `approved`. For a plain task there is only
- * `completed`, which is what this action has always written.
+ * completing a task means `approved`. Writing `approval_status` alone is enough
+ * - Asana derives `completed` from it - and it must be written alone: sending
+ * `completed` in the same request as `approval_status` gets rejected with a 400,
+ * even when the two agree on the same outcome (observed in production against a
+ * freshly created approval subtask). For a plain task there is only `completed`,
+ * which is what this action has always written.
  */
 function setReviewOutcome(subtask, outcome) {
+    var _a;
     return __awaiter(this, void 0, void 0, function* () {
-        const completed = outcome !== 'pending';
         const data = subtask.resource_subtype === 'approval'
-            ? { completed, approval_status: outcome }
-            : { completed };
+            ? { approval_status: outcome }
+            : { completed: outcome !== 'pending' };
         (0, core_1.info)(`Setting review subtask ${subtask.gid} to ${JSON.stringify(data)}`);
-        yield exports.tasksApi.updateTask({ data }, subtask.gid);
+        try {
+            yield exports.tasksApi.updateTask({ data }, subtask.gid);
+        }
+        catch (e) {
+            const body = (_a = e.response) === null || _a === void 0 ? void 0 : _a.text;
+            (0, core_1.info)(`Setting review outcome failed: ${e}${body ? ` - ${body}` : ''}`);
+            throw e;
+        }
     });
 }
 // Whether this Asana plan supports approvals is a property of the workspace, so

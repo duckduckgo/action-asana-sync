@@ -80,10 +80,13 @@ describe('new pull request (opened)', () => {
   it('does not assign the task when ASSIGN_PR_AUTHOR is false', async () => {
     mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
-    const createScope = mockCreateTask(data => {
-      expect(data.assignee).toBeUndefined()
-      return true
-    }, makeTask({gid: '5002'}))
+    const createScope = mockCreateTask(
+      data => {
+        expect(data.assignee).toBeUndefined()
+        return true
+      },
+      makeTask({gid: '5002'})
+    )
     mockSubtasks('5002', [])
     mockUpdateTask('5002', () => true)
 
@@ -99,10 +102,13 @@ describe('new pull request (opened)', () => {
   it('assigns the task to the mapped Asana user when ASSIGN_PR_AUTHOR is true', async () => {
     mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
-    const createScope = mockCreateTask(data => {
-      expect(data.assignee).toBe('author@example.com')
-      return true
-    }, makeTask({gid: '5003'}))
+    const createScope = mockCreateTask(
+      data => {
+        expect(data.assignee).toBe('author@example.com')
+        return true
+      },
+      makeTask({gid: '5003'})
+    )
     mockSubtasks('5003', [])
     mockUpdateTask('5003', () => true)
 

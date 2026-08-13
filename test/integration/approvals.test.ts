@@ -216,7 +216,9 @@ describe('review verdicts on an approval subtask', () => {
       })
       const verdictScope = mockUpdateTask('8401', data => {
         expect(data.approval_status).toBe(approvalStatus)
-        expect(data.completed).toBe(true)
+        // completed is never sent alongside approval_status: Asana derives it,
+        // and sending both together is rejected with a 400.
+        expect(data.completed).toBeUndefined()
         return true
       })
       // Consumed only by a second write, which there should not be.
@@ -233,6 +235,40 @@ describe('review verdicts on an approval subtask', () => {
       expect(extraWriteScope.isDone()).toBe(false)
     }
   )
+
+  it('creates a new approval subtask and records the verdict in one write, for a reviewer with no prior subtask', async () => {
+    // Reproduces a production failure: a reviewer who was never sent a formal
+    // review request (so no review-requested subtask exists yet) submits an
+    // already-decided review. createOrReopenReviewSubtask creates the subtask
+    // and setReviewOutcome writes its verdict moments later - real Asana
+    // rejects that verdict write with a 400 when it also carries `completed`.
+    const taskGid = '8440'
+    mockPRTaskLookup(taskGid, CUSTOM_FIELDS)
+    mockSubtasks(taskGid, [])
+    mockAddSubtask(
+      taskGid,
+      data => {
+        expect(data.resource_subtype).toBe('approval')
+        expect(data.approval_status).toBe('pending')
+        return true
+      },
+      makeSubtask({gid: '8441', resource_subtype: 'approval'})
+    )
+    const verdictScope = mockUpdateTask('8441', data => {
+      expect(data.approval_status).toBe('approved')
+      expect(data.completed).toBeUndefined()
+      return true
+    })
+
+    const {setFailed} = await runAction({
+      eventName: 'pull_request_review',
+      payload: APPROVED_EVENT,
+      inputs: APPROVALS_ON
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(verdictScope.isDone()).toBe(true)
+  })
 
   const pendingCases = [
     {description: 'a commented review', payload: COMMENTED_EVENT},
@@ -252,7 +288,7 @@ describe('review verdicts on an approval subtask', () => {
       })
       const pendingScope = mockUpdateTask('8411', data => {
         expect(data.approval_status).toBe('pending')
-        expect(data.completed).toBe(false)
+        expect(data.completed).toBeUndefined()
         return true
       })
 
@@ -356,7 +392,7 @@ describe('pull request closed', () => {
     ])
     const approvalScope = mockUpdateTask('8601', data => {
       expect(data.approval_status).toBe('approved')
-      expect(data.completed).toBe(true)
+      expect(data.completed).toBeUndefined()
       return true
     })
     const decidedScope = mockUpdateTaskNeverCalled('8602')
