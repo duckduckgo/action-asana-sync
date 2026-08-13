@@ -37,6 +37,82 @@ exports.outcomeForReview = outcomeForReview;
 
 /***/ }),
 
+/***/ 66513:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.installAsanaRateLimitBackoff = void 0;
+const asana_1 = __nccwpck_require__(30576);
+const core_1 = __nccwpck_require__(42186);
+const MAX_RETRIES = 5;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 30000;
+/** Asana sends `Retry-After` in seconds on a 429. */
+function retryAfterMs(error) {
+    var _a, _b;
+    const header = (_b = (_a = error.response) === null || _a === void 0 ? void 0 : _a.headers) === null || _b === void 0 ? void 0 : _b['retry-after'];
+    if (!header)
+        return undefined;
+    const seconds = Number(header);
+    return Number.isNaN(seconds) ? undefined : seconds * 1000;
+}
+function backoffDelayMs(attempt, error) {
+    const retryAfter = retryAfterMs(error);
+    if (retryAfter !== undefined)
+        return retryAfter;
+    const exponential = BASE_DELAY_MS * Math.pow(2, attempt);
+    const jitter = Math.floor(Math.random() * BASE_DELAY_MS);
+    return Math.min(exponential + jitter, MAX_DELAY_MS);
+}
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+/**
+ * Every Asana API call this action makes - across TasksApi, UsersApi,
+ * CustomFieldsApi, SectionsApi, ... - goes through this one method, so
+ * wrapping it here retries a rate-limited request for every call site at
+ * once. A 429 means Asana rejected the request before doing anything with
+ * it, so retrying is always safe here, unlike a 5xx which may have partially
+ * applied.
+ */
+function installAsanaRateLimitBackoff(client = asana_1.ApiClient.instance, wait = sleep) {
+    const originalCallApi = client.callApi.bind(client);
+    client.callApi = function callApiWithBackoff(...args) {
+        return __awaiter(this, void 0, void 0, function* () {
+            for (let attempt = 0;; attempt++) {
+                try {
+                    return yield originalCallApi(...args);
+                }
+                catch (error) {
+                    const status = error.status;
+                    if (status !== 429 || attempt >= MAX_RETRIES) {
+                        throw error;
+                    }
+                    const delay = backoffDelayMs(attempt, error);
+                    (0, core_1.info)(`Asana API rate limit hit (429) on ${args[1]} ${args[0]}. ` +
+                        `Retrying in ${delay}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+                    yield wait(delay);
+                }
+            }
+        });
+    };
+}
+exports.installAsanaRateLimitBackoff = installAsanaRateLimitBackoff;
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -56,6 +132,7 @@ exports.done = exports.createOrReopenReviewSubtask = exports.tasksApi = void 0;
 const asana_1 = __nccwpck_require__(30576);
 const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
+const asana_retry_1 = __nccwpck_require__(66513);
 const approvals_1 = __nccwpck_require__(35238);
 const markdown_1 = __nccwpck_require__(15821);
 const reviewers_1 = __nccwpck_require__(40512);
@@ -68,6 +145,9 @@ asana_1.ApiClient.instance.authentications.token.accessToken = (0, core_1.getInp
 asana_1.ApiClient.instance.defaultHeaders = {
     'asana-enable': 'new_user_task_lists,new_project_templates,new_goal_memberships'
 };
+// Every Asana call this action makes goes through this one client, so a
+// single retry-on-429 wrapper here covers all of them.
+(0, asana_retry_1.installAsanaRateLimitBackoff)();
 exports.tasksApi = new asana_1.TasksApi();
 const usersApi = new asana_1.UsersApi();
 const customFieldsApi = new asana_1.CustomFieldsApi();

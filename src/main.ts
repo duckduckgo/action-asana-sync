@@ -14,6 +14,7 @@ import {
   PullRequestReviewRequestedEvent
 } from '@octokit/webhooks-types'
 
+import {installAsanaRateLimitBackoff} from './asana-retry'
 import {outcomeForReview, ReviewOutcome} from './approvals'
 import {renderMD} from './markdown'
 import {getReviewerLogins} from './reviewers'
@@ -60,6 +61,9 @@ ApiClient.instance.defaultHeaders = {
   'asana-enable':
     'new_user_task_lists,new_project_templates,new_goal_memberships'
 }
+// Every Asana call this action makes goes through this one client, so a
+// single retry-on-429 wrapper here covers all of them.
+installAsanaRateLimitBackoff()
 export const tasksApi = new TasksApi()
 const usersApi = new UsersApi()
 const customFieldsApi = new CustomFieldsApi()
