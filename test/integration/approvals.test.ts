@@ -1,4 +1,4 @@
-import {runAction, loadFixture} from './helpers/harness'
+import {runAction, loadFixture} from './helpers/harness.js'
 import {
   mockSubtasks,
   mockAddSubtask,
@@ -8,9 +8,9 @@ import {
   mockPRTaskLookup,
   mockUpdateTask,
   mockUpdateTaskNeverCalled
-} from './helpers/mock-asana'
-import {makeSubtask, makeTask} from './fixtures/asana/factories'
-import './setup'
+} from './helpers/mock-asana.js'
+import {makeSubtask, makeTask} from './fixtures/asana/factories.js'
+import './setup.js'
 
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
 const REVIEW_REQUESTED_EVENT = loadFixture(

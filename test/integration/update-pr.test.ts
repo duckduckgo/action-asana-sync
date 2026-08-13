@@ -1,4 +1,5 @@
-import {runAction, loadFixture} from './helpers/harness'
+import {jest} from '@jest/globals'
+import {runAction, loadFixture} from './helpers/harness.js'
 import {
   mockCustomFields,
   mockSearchTasksInWorkspace,
@@ -6,9 +7,9 @@ import {
   mockCreateTask,
   mockSubtasks,
   mockUpdateTask
-} from './helpers/mock-asana'
-import {makeTask} from './fixtures/asana/factories'
-import './setup'
+} from './helpers/mock-asana.js'
+import {makeTask} from './fixtures/asana/factories.js'
+import './setup.js'
 
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
 const SYNCHRONIZE_EVENT = loadFixture(

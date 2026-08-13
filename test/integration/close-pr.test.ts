@@ -1,13 +1,13 @@
-import {runAction, loadFixture} from './helpers/harness'
+import {runAction, loadFixture} from './helpers/harness.js'
 import {
   mockCustomFields,
   mockSearchTasksInWorkspace,
   mockSubtasks,
   mockFindTaskById,
   mockUpdateTask
-} from './helpers/mock-asana'
-import {makeTask, makeSubtask} from './fixtures/asana/factories'
-import './setup'
+} from './helpers/mock-asana.js'
+import {makeTask, makeSubtask} from './fixtures/asana/factories.js'
+import './setup.js'
 
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
 const CLOSED_EVENT = loadFixture(

@@ -1,4 +1,4 @@
-import {getReviewerLogins} from '../src/reviewers'
+import {getReviewerLogins} from '../src/reviewers.js'
 
 describe('getReviewerLogins', () => {
   it('unions assignees and requested reviewers, deduped', () => {

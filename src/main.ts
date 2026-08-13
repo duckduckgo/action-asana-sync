@@ -14,10 +14,10 @@ import {
   PullRequestReviewRequestedEvent
 } from '@octokit/webhooks-types'
 
-import {outcomeForReview, ReviewOutcome} from './approvals'
-import {renderMD} from './markdown'
-import {getReviewerLogins} from './reviewers'
-import {getUserFromLogin} from './user-map'
+import {outcomeForReview, ReviewOutcome} from './approvals.js'
+import {renderMD} from './markdown.js'
+import {getReviewerLogins} from './reviewers.js'
+import {getUserFromLogin} from './user-map.js'
 
 const CUSTOM_FIELD_NAMES = {
   url: 'Github URL',

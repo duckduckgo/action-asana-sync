@@ -1,5 +1,5 @@
-import {runAction, loadFixture} from './helpers/harness'
-import './setup'
+import {runAction, loadFixture} from './helpers/harness.js'
+import './setup.js'
 
 const OPENED_EVENT = loadFixture('fixtures/events/pull_request.opened.json')
 

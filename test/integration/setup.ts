@@ -1,5 +1,6 @@
 import nock from 'nock'
-import {cleanupFixtures} from './helpers/harness'
+import {jest} from '@jest/globals'
+import {cleanupFixtures} from './helpers/harness.js'
 
 const ORIGINAL_ENV = {...process.env}
 

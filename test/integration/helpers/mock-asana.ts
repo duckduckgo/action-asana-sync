@@ -1,7 +1,7 @@
 import nock from 'nock'
 
-import {makeSubtask, makeTask, makeUser} from '../fixtures/asana/factories'
-import {WORKSPACE_ID} from './harness'
+import {makeSubtask, makeTask, makeUser} from '../fixtures/asana/factories.js'
+import {WORKSPACE_ID} from './harness.js'
 
 // The `asana` client (npm package) talks plain REST+JSON to this base URL
 // via `superagent`, which rides on Node's core http/https modules -- so

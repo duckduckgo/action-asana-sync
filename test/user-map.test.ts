@@ -3,10 +3,13 @@ import {MockAgent, getGlobalDispatcher, setGlobalDispatcher} from 'undici'
 const REPO_OWNER = 'duckduckgo'
 const REPO_NAME = 'internal-github-asana-utils'
 
-function loadUserMapModule(): typeof import('../src/user-map') {
-  jest.resetModules()
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('../src/user-map')
+// Jest's ESM module registry isn't cleared by jest.resetModules() the way
+// its CommonJS registry is, so a fresh copy of user-map.ts (with its
+// module-level EXTERNAL_MAPPING_LOADED cache reset) needs a cache-busting
+// import specifier instead.
+let loadCount = 0
+function loadUserMapModule(): Promise<typeof import('../src/user-map.js')> {
+  return import(`../src/user-map.js?update=${loadCount++}`)
 }
 
 describe('getUserFromLogin', () => {
@@ -36,7 +39,7 @@ describe('getUserFromLogin', () => {
     })
     delete process.env.INPUT_GITHUB_PAT
 
-    const {getUserFromLogin} = loadUserMapModule()
+    const {getUserFromLogin} = await loadUserMapModule()
 
     await expect(getUserFromLogin('octocat')).resolves.toBe(
       'octocat@example.com'
@@ -47,7 +50,7 @@ describe('getUserFromLogin', () => {
     process.env.INPUT_USER_MAP = '{}'
     delete process.env.INPUT_GITHUB_PAT
 
-    const {getUserFromLogin} = loadUserMapModule()
+    const {getUserFromLogin} = await loadUserMapModule()
 
     await expect(getUserFromLogin('nobody')).resolves.toBeUndefined()
   })
@@ -68,7 +71,7 @@ describe('getUserFromLogin', () => {
         headers: {'content-type': 'text/plain; charset=utf-8'}
       })
 
-    const {getUserFromLogin} = loadUserMapModule()
+    const {getUserFromLogin} = await loadUserMapModule()
 
     await expect(getUserFromLogin('sammacbeth')).resolves.toBe(
       '1199184945884326'
@@ -95,7 +98,7 @@ describe('getUserFromLogin', () => {
         headers: {'content-type': 'text/plain; charset=utf-8'}
       })
 
-    const {getUserFromLogin} = loadUserMapModule()
+    const {getUserFromLogin} = await loadUserMapModule()
 
     await expect(getUserFromLogin('sammacbeth')).resolves.toBe(
       '1199184945884326'

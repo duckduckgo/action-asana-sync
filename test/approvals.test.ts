@@ -1,4 +1,4 @@
-import {outcomeForReview, ReviewOutcome} from '../src/approvals'
+import {outcomeForReview, ReviewOutcome} from '../src/approvals.js'
 
 describe('outcomeForReview', () => {
   const cases: {action: string; state?: string; expected: ReviewOutcome}[] = [
