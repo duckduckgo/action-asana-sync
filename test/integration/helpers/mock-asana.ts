@@ -1,7 +1,7 @@
 import nock from 'nock'
 
 import {makeSubtask, makeTask} from '../fixtures/asana/factories'
-import {WORKSPACE_ID} from './harness'
+import {PROJECT_ID, WORKSPACE_ID} from './harness'
 
 // The `asana` client (npm package) talks plain REST+JSON to this base URL
 // via `superagent`, which rides on Node's core http/https modules -- so
@@ -27,30 +27,42 @@ function mockGet(urlPath: string, data: unknown): nock.Scope {
   return scope().get(urlPath).query(true).reply(200, {data})
 }
 
+/** Wraps a compact custom field as the `custom_field_settings` shape that
+ * `GET /projects/{project_gid}/custom_field_settings` returns it in. */
+function asCustomFieldSetting(field: unknown): unknown {
+  return {custom_field: field}
+}
+
 export function mockCustomFields(
-  workspaceGid: string,
+  projectGid: string,
   fields: unknown[]
 ): nock.Scope {
-  return mockGet(`${API}/workspaces/${workspaceGid}/custom_fields`, fields)
+  return mockGet(
+    `${API}/projects/${projectGid}/custom_field_settings`,
+    fields.map(asCustomFieldSetting)
+  )
 }
 
 /**
- * Mocks a single page of the (offset-paginated) custom fields listing.
- * Pass `nextOffset` to indicate more pages follow, and `offset` to match
- * the request that asks for this specific page.
+ * Mocks a single page of the (offset-paginated) custom field settings
+ * listing for a project. Pass `nextOffset` to indicate more pages follow,
+ * and `offset` to match the request that asks for this specific page.
  */
 export function mockCustomFieldsPage(
-  workspaceGid: string,
+  projectGid: string,
   fields: unknown[],
   {offset, nextOffset}: {offset?: string; nextOffset?: string} = {}
 ): nock.Scope {
-  const query: Record<string, string> = {limit: '100'}
+  const query: Record<string, string> = {
+    limit: '100',
+    opt_fields: 'custom_field.name,custom_field.enum_options'
+  }
   if (offset) query.offset = offset
   return scope()
-    .get(`${API}/workspaces/${workspaceGid}/custom_fields`)
+    .get(`${API}/projects/${projectGid}/custom_field_settings`)
     .query(query)
     .reply(200, {
-      data: fields,
+      data: fields.map(asCustomFieldSetting),
       next_page: nextOffset ? {offset: nextOffset} : null
     })
 }
@@ -162,7 +174,7 @@ export function mockPRTaskLookup(
   customFields: unknown[],
   updateMatcher: (data: JSONBody) => boolean = () => true
 ): nock.Scope {
-  mockCustomFields(WORKSPACE_ID, customFields)
+  mockCustomFields(PROJECT_ID, customFields)
   mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
   return mockUpdateTask(taskGid, updateMatcher)
 }

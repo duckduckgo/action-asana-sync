@@ -15,11 +15,12 @@ const CLOSED_EVENT = loadFixture(
 )
 
 const WORKSPACE_ID = '1000'
+const PROJECT_ID = '2000'
 
 describe('pull request closed/merged', () => {
   it('marks the PR task completed when it is not in a NO_AUTOCLOSE project', async () => {
     const taskGid = '7000'
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
     // Mocked permissively: closeSubtasks() is covered in detail by
     // approvals.test.ts.
@@ -42,7 +43,7 @@ describe('pull request closed/merged', () => {
 
   it('leaves the PR task open when it belongs to a NO_AUTOCLOSE project', async () => {
     const taskGid = '7002'
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
     mockSubtasks(taskGid, []).persist()
     mockFindTaskById(

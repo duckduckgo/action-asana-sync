@@ -1,4 +1,10 @@
-import {ApiClient, CustomFieldsApi, SectionsApi, TasksApi} from 'asana'
+import {
+  ApiClient,
+  CustomFieldsApi,
+  CustomFieldSettingsApi,
+  SectionsApi,
+  TasksApi
+} from 'asana'
 import {info, setFailed, getInput, debug, setOutput} from '@actions/core'
 import {context} from '@actions/github'
 import {
@@ -61,6 +67,7 @@ ApiClient.instance.defaultHeaders = {
 // single retry-on-429 wrapper here covers all of them.
 installAsanaRateLimitBackoff()
 export const tasksApi = new TasksApi()
+const customFieldSettingsApi = new CustomFieldSettingsApi()
 const customFieldsApi = new CustomFieldsApi()
 const sectionsApi = new SectionsApi()
 const ASANA_WORKSPACE_ID = getInput('ASANA_WORKSPACE_ID', {required: true})
@@ -498,7 +505,7 @@ async function run(): Promise<void> {
     const htmlUrl = payload.pull_request.html_url
     info(`PR url: ${htmlUrl}`)
     info(`Action: ${payload.action}`)
-    const customFields = await findCustomFields(ASANA_WORKSPACE_ID)
+    const customFields = await findCustomFields(PROJECT_ID)
 
     // PR metadata
     const statusGid =
@@ -631,27 +638,39 @@ ${truncatedBody}`
 // `ApiClient.instance.RETURN_COLLECTION` defaults to true) exposes `.data`
 // for the current page and a `.nextPage()` method that resolves to the next
 // `Collection`, or to `{data: null}` once there are no more pages.
-interface AsanaCollectionPage {
-  data: AsanaCustomField[] | null
-  nextPage(): Promise<AsanaCollectionPage>
+interface AsanaCollectionPage<T> {
+  data: T[] | null
+  nextPage(): Promise<AsanaCollectionPage<T>>
 }
 
-async function getAllCustomFieldsForWorkspace(
-  workspaceGid: string
+interface AsanaCustomFieldSetting {
+  custom_field: AsanaCustomField
+}
+
+/**
+ * Lists the custom fields attached to the destination project, rather than
+ * every custom field in the whole workspace: a workspace can have hundreds of
+ * fields spread across many teams, so paging through all of them just to
+ * find these two by name is a needlessly expensive call to make on every PR
+ * event, and one that's easy to rate-limit.
+ */
+async function getCustomFieldsForProject(
+  projectGid: string
 ): Promise<AsanaCustomField[]> {
-  const customFields: AsanaCustomField[] = []
-  let page = (await customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
-    limit: 100
-  })) as AsanaCollectionPage
+  const settings: AsanaCustomFieldSetting[] = []
+  let page = (await customFieldSettingsApi.getCustomFieldSettingsForProject(
+    projectGid,
+    {limit: 100, opt_fields: 'custom_field.name,custom_field.enum_options'}
+  )) as AsanaCollectionPage<AsanaCustomFieldSetting>
   while (page.data) {
-    customFields.push(...page.data)
+    settings.push(...page.data)
     page = await page.nextPage()
   }
-  return customFields
+  return settings.map(setting => setting.custom_field)
 }
 
-async function findCustomFields(workspaceGid: string): Promise<PRFields> {
-  const customFields = await getAllCustomFieldsForWorkspace(workspaceGid)
+async function findCustomFields(projectGid: string): Promise<PRFields> {
+  const customFields = await getCustomFieldsForProject(projectGid)
 
   const githubUrlField = customFields.find(
     f => f.name === CUSTOM_FIELD_NAMES.url

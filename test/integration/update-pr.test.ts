@@ -21,7 +21,7 @@ const PR_URL = 'https://github.com/duckduckgo/action-asana-sync/pull/42'
 
 describe('existing pull request updates', () => {
   it('finds the task via workspace search and updates it', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     const existingTask = makeTask({gid: '6000'})
     mockSearchTasksInWorkspace(WORKSPACE_ID, [existingTask])
     mockSubtasks('6000', [])
@@ -43,7 +43,7 @@ describe('existing pull request updates', () => {
   })
 
   it('falls back to the project task list when search has not caught up yet', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockSearchTasksInWorkspace(WORKSPACE_ID, [])
     const existingTask = makeTask({
       gid: '6001',
@@ -82,7 +82,7 @@ describe('existing pull request updates', () => {
         return realSetTimeout(fn, delay)
       })
 
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     for (let i = 0; i < 3; i++) {
       mockSearchTasksInWorkspace(WORKSPACE_ID, [])
       mockProjectTasks(PROJECT_ID, [])
