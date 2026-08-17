@@ -2,6 +2,7 @@ import {runAction, loadFixture} from './helpers/harness'
 import {
   mockCustomFields,
   mockCustomFieldsPage,
+  mockWorkspaceCustomFields,
   mockCreateTask,
   mockFindTaskById,
   mockFindTaskByIdFails,
@@ -15,6 +16,7 @@ import './setup'
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
 const OPENED_EVENT = loadFixture('fixtures/events/pull_request.opened.json')
 
+const WORKSPACE_ID = '1000'
 const PROJECT_ID = '2000'
 
 describe('new pull request (opened)', () => {
@@ -174,10 +176,36 @@ describe('new pull request (opened)', () => {
     expect(createScope.isDone()).toBe(true)
   })
 
-  it('fails gracefully when the required custom fields are missing on the project', async () => {
+  it('falls back to a workspace-wide scan when a required field is missing from the project', async () => {
+    // The project's own custom field settings are missing "Github Status"
+    // (e.g. it was never attached there), but it still exists somewhere in
+    // the workspace.
+    mockCustomFields(PROJECT_ID, [{gid: '111', name: 'Github URL'}])
+    mockWorkspaceCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
+    const createdTask = makeTask({gid: '5006'})
+    const createScope = mockCreateTask(() => true, createdTask)
+    mockSubtasks('5006', [])
+    mockUpdateTask('5006', () => true)
+
+    const {setFailed, setOutput} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'created')
+    expect(createScope.isDone()).toBe(true)
+  })
+
+  it('fails gracefully when the required custom fields are missing from both the project and the workspace', async () => {
     mockCustomFields(PROJECT_ID, [
       {gid: '111', name: 'Github URL'}
       // "Github Status" missing
+    ])
+    mockWorkspaceCustomFields(WORKSPACE_ID, [
+      {gid: '111', name: 'Github URL'}
+      // "Github Status" missing here too, so the fallback also comes up short.
     ])
 
     const {setFailed, setOutput} = await runAction({

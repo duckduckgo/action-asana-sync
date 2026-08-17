@@ -44,6 +44,18 @@ export function mockCustomFields(
 }
 
 /**
+ * Mocks the workspace-wide custom fields listing that findCustomFields()
+ * falls back to when the project-scoped lookup above doesn't turn up both
+ * required fields.
+ */
+export function mockWorkspaceCustomFields(
+  workspaceGid: string,
+  fields: unknown[]
+): nock.Scope {
+  return mockGet(`${API}/workspaces/${workspaceGid}/custom_fields`, fields)
+}
+
+/**
  * Mocks a single page of the (offset-paginated) custom field settings
  * listing for a project. Pass `nextOffset` to indicate more pages follow,
  * and `offset` to match the request that asks for this specific page.
@@ -68,17 +80,17 @@ export function mockCustomFieldsPage(
 }
 
 /**
- * Mocks the workspace custom-fields endpoint failing once with a 429 and
- * succeeding on the retry, to exercise the rate-limit backoff wrapper
+ * Mocks the project custom-field-settings endpoint failing once with a 429
+ * and succeeding on the retry, to exercise the rate-limit backoff wrapper
  * end-to-end. `retryAfter`, if given, is sent back as the `Retry-After`
  * header (seconds); pass `'0'` to keep the test's actual wait time near-zero.
  */
 export function mockCustomFieldsRateLimitedOnce(
-  workspaceGid: string,
+  projectGid: string,
   fields: unknown[],
   {retryAfter}: {retryAfter?: string} = {}
 ): {failed: nock.Scope; succeeded: nock.Scope} {
-  const urlPath = `${API}/workspaces/${workspaceGid}/custom_fields`
+  const urlPath = `${API}/projects/${projectGid}/custom_field_settings`
   const failed = scope()
     .get(urlPath)
     .query(true)
@@ -87,7 +99,10 @@ export function mockCustomFieldsRateLimitedOnce(
       {errors: [{message: 'Too Many Requests'}]},
       retryAfter ? {'Retry-After': retryAfter} : undefined
     )
-  const succeeded = scope().get(urlPath).query(true).reply(200, {data: fields})
+  const succeeded = scope()
+    .get(urlPath)
+    .query(true)
+    .reply(200, {data: fields.map(asCustomFieldSetting)})
   return {failed, succeeded}
 }
 

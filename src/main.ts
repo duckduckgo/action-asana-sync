@@ -505,7 +505,7 @@ async function run(): Promise<void> {
     const htmlUrl = payload.pull_request.html_url
     info(`PR url: ${htmlUrl}`)
     info(`Action: ${payload.action}`)
-    const customFields = await findCustomFields(PROJECT_ID)
+    const customFields = await findCustomFields(PROJECT_ID, ASANA_WORKSPACE_ID)
 
     // PR metadata
     const statusGid =
@@ -647,6 +647,19 @@ interface AsanaCustomFieldSetting {
   custom_field: AsanaCustomField
 }
 
+/** Collects every page of an Asana Collection into a single array. */
+async function collectAllPages<T>(
+  firstPage: Promise<AsanaCollectionPage<T>> | AsanaCollectionPage<T>
+): Promise<T[]> {
+  const items: T[] = []
+  let page = await firstPage
+  while (page.data) {
+    items.push(...page.data)
+    page = await page.nextPage()
+  }
+  return items
+}
+
 /**
  * Lists the custom fields attached to the destination project, rather than
  * every custom field in the whole workspace: a workspace can have hundreds of
@@ -657,34 +670,75 @@ interface AsanaCustomFieldSetting {
 async function getCustomFieldsForProject(
   projectGid: string
 ): Promise<AsanaCustomField[]> {
-  const settings: AsanaCustomFieldSetting[] = []
-  let page = (await customFieldSettingsApi.getCustomFieldSettingsForProject(
-    projectGid,
-    {limit: 100, opt_fields: 'custom_field.name,custom_field.enum_options'}
-  )) as AsanaCollectionPage<AsanaCustomFieldSetting>
-  while (page.data) {
-    settings.push(...page.data)
-    page = await page.nextPage()
-  }
+  const settings = await collectAllPages<AsanaCustomFieldSetting>(
+    customFieldSettingsApi.getCustomFieldSettingsForProject(projectGid, {
+      limit: 100,
+      opt_fields: 'custom_field.name,custom_field.enum_options'
+    })
+  )
   return settings.map(setting => setting.custom_field)
 }
 
-async function findCustomFields(projectGid: string): Promise<PRFields> {
-  const customFields = await getCustomFieldsForProject(projectGid)
+/**
+ * Falls back to every custom field in the whole workspace, for the case
+ * where "Github URL"/"Github Status" exist but were never attached to the
+ * destination project's own custom field settings. Only tried once the
+ * cheap project-scoped lookup above has come up short, since this can page
+ * through hundreds of fields unrelated to this project.
+ */
+async function getAllCustomFieldsForWorkspace(
+  workspaceGid: string
+): Promise<AsanaCustomField[]> {
+  return collectAllPages<AsanaCustomField>(
+    customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {limit: 100})
+  )
+}
 
-  const githubUrlField = customFields.find(
-    f => f.name === CUSTOM_FIELD_NAMES.url
-  )
-  const githubStatusField = customFields.find(
-    f => f.name === CUSTOM_FIELD_NAMES.status
-  )
-  if (!githubUrlField || !githubStatusField) {
-    debug(JSON.stringify(customFields))
-    throw new Error('Custom fields are missing. Please create them')
-  } else {
-    debug(`${CUSTOM_FIELD_NAMES.url} field GID: ${githubUrlField?.gid}`)
-    debug(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField?.gid}`)
+interface FoundCustomFields {
+  url?: AsanaCustomField
+  status?: AsanaCustomField
+}
+
+function pickCustomFields(customFields: AsanaCustomField[]): FoundCustomFields {
+  return {
+    url: customFields.find(f => f.name === CUSTOM_FIELD_NAMES.url),
+    status: customFields.find(f => f.name === CUSTOM_FIELD_NAMES.status)
   }
+}
+
+async function findCustomFields(
+  projectGid: string,
+  workspaceGid: string
+): Promise<PRFields> {
+  let {url: githubUrlField, status: githubStatusField} = pickCustomFields(
+    await getCustomFieldsForProject(projectGid)
+  )
+
+  if (!githubUrlField || !githubStatusField) {
+    info(
+      `${CUSTOM_FIELD_NAMES.url}/${CUSTOM_FIELD_NAMES.status} not both found ` +
+        `on the project's own custom fields. Falling back to a workspace-wide scan`
+    )
+    const fromWorkspace = pickCustomFields(
+      await getAllCustomFieldsForWorkspace(workspaceGid)
+    )
+    githubUrlField = githubUrlField || fromWorkspace.url
+    githubStatusField = githubStatusField || fromWorkspace.status
+  }
+
+  if (!githubUrlField || !githubStatusField) {
+    debug(
+      `Still missing after the workspace-wide scan: ${[
+        !githubUrlField && CUSTOM_FIELD_NAMES.url,
+        !githubStatusField && CUSTOM_FIELD_NAMES.status
+      ]
+        .filter(Boolean)
+        .join(', ')}`
+    )
+    throw new Error('Custom fields are missing. Please create them')
+  }
+  debug(`${CUSTOM_FIELD_NAMES.url} field GID: ${githubUrlField.gid}`)
+  debug(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField.gid}`)
   return {
     url: githubUrlField,
     status: githubStatusField
