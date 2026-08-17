@@ -2,6 +2,7 @@ import {runAction, loadFixture} from './helpers/harness'
 import {
   mockCustomFields,
   mockCustomFieldsPage,
+  mockWorkspaceCustomFields,
   mockCreateTask,
   mockFindTaskById,
   mockFindTaskByIdFails,
@@ -20,7 +21,7 @@ const PROJECT_ID = '2000'
 
 describe('new pull request (opened)', () => {
   it('creates a task, links the Asana task mentioned in the body as parent, and reports created', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({
       gid: '5000',
@@ -58,7 +59,7 @@ describe('new pull request (opened)', () => {
   })
 
   it('omits the parent link when the referenced Asana task cannot be accessed', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockFindTaskByIdFails('9876543210', 404)
     const createdTask = makeTask({gid: '5001'})
     const createScope = mockCreateTask(data => {
@@ -78,7 +79,7 @@ describe('new pull request (opened)', () => {
   })
 
   it('does not assign the task when ASSIGN_PR_AUTHOR is false', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createScope = mockCreateTask(
       data => {
@@ -100,7 +101,7 @@ describe('new pull request (opened)', () => {
   })
 
   it('assigns the task to the mapped Asana user when ASSIGN_PR_AUTHOR is true', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createScope = mockCreateTask(
       data => {
@@ -125,7 +126,7 @@ describe('new pull request (opened)', () => {
   })
 
   it('falls back to plaintext notes when updating with html_notes fails', async () => {
-    mockCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     mockCreateTask(() => true, makeTask({gid: '5004'}))
     mockSubtasks('5004', [])
@@ -146,17 +147,17 @@ describe('new pull request (opened)', () => {
     expect(plaintextUpdate.isDone()).toBe(true)
   })
 
-  it('paginates through all custom fields when the workspace has more than one page', async () => {
-    // The workspace has >100 custom fields, so the ones we need ("Github URL"
-    // and "Github Status") only show up on the second page of results.
+  it('paginates through all custom fields when the project has more than one page', async () => {
+    // The project has >100 custom fields attached, so the ones we need
+    // ("Github URL" and "Github Status") only show up on the second page.
     const firstPageFields = Array.from({length: 100}, (_, i) => ({
       gid: `unrelated-${i}`,
       name: `Unrelated field ${i}`
     }))
-    mockCustomFieldsPage(WORKSPACE_ID, firstPageFields, {
+    mockCustomFieldsPage(PROJECT_ID, firstPageFields, {
       nextOffset: 'page-2-token'
     })
-    mockCustomFieldsPage(WORKSPACE_ID, CUSTOM_FIELDS, {
+    mockCustomFieldsPage(PROJECT_ID, CUSTOM_FIELDS, {
       offset: 'page-2-token'
     })
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
@@ -175,10 +176,67 @@ describe('new pull request (opened)', () => {
     expect(createScope.isDone()).toBe(true)
   })
 
-  it('fails gracefully when the required custom fields are missing in the workspace', async () => {
-    mockCustomFields(WORKSPACE_ID, [
+  it('stops paginating once both required fields are found, without fetching later pages', async () => {
+    // Both target fields are already on page 1 (mixed in with unrelated
+    // fields), which also indicates a page 2 exists. A lazy scan has no
+    // reason to ever ask for it.
+    mockCustomFieldsPage(
+      PROJECT_ID,
+      [...CUSTOM_FIELDS, {gid: '999', name: 'Unrelated'}],
+      {
+        nextOffset: 'page-2-token'
+      }
+    )
+    const page2Scope = mockCustomFieldsPage(PROJECT_ID, [], {
+      offset: 'page-2-token'
+    })
+    mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
+    const createdTask = makeTask({gid: '5010'})
+    const createScope = mockCreateTask(() => true, createdTask)
+    mockSubtasks('5010', [])
+    mockUpdateTask('5010', () => true)
+
+    const {setFailed, setOutput} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'created')
+    expect(createScope.isDone()).toBe(true)
+    expect(page2Scope.isDone()).toBe(false)
+  })
+
+  it('falls back to a workspace-wide scan when a required field is missing from the project', async () => {
+    // The project's own custom field settings are missing "Github Status"
+    // (e.g. it was never attached there), but it still exists somewhere in
+    // the workspace.
+    mockCustomFields(PROJECT_ID, [{gid: '111', name: 'Github URL'}])
+    mockWorkspaceCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
+    const createdTask = makeTask({gid: '5006'})
+    const createScope = mockCreateTask(() => true, createdTask)
+    mockSubtasks('5006', [])
+    mockUpdateTask('5006', () => true)
+
+    const {setFailed, setOutput} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'created')
+    expect(createScope.isDone()).toBe(true)
+  })
+
+  it('fails gracefully when the required custom fields are missing from both the project and the workspace', async () => {
+    mockCustomFields(PROJECT_ID, [
       {gid: '111', name: 'Github URL'}
       // "Github Status" missing
+    ])
+    mockWorkspaceCustomFields(WORKSPACE_ID, [
+      {gid: '111', name: 'Github URL'}
+      // "Github Status" missing here too, so the fallback also comes up short.
     ])
 
     const {setFailed, setOutput} = await runAction({

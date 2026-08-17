@@ -4,11 +4,13 @@ import path from 'path'
 
 /** The workspace every test runs against, and mocks Asana calls for. */
 export const WORKSPACE_ID = '1000'
+/** The destination project every test runs against, and mocks Asana calls for. */
+export const PROJECT_ID = '2000'
 
 const DEFAULT_INPUTS: Record<string, string> = {
   ASANA_ACCESS_TOKEN: 'test-asana-token',
   ASANA_WORKSPACE_ID: WORKSPACE_ID,
-  ASANA_PROJECT_ID: '2000',
+  ASANA_PROJECT_ID: PROJECT_ID,
   SKIPPED_USERS: '',
   NO_AUTOCLOSE_PROJECTS: '',
   ASSIGN_PR_AUTHOR: 'false',

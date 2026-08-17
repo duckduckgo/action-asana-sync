@@ -14,14 +14,14 @@ import './setup'
 const CUSTOM_FIELDS = loadFixture('fixtures/asana/custom-fields.json')
 const OPENED_EVENT = loadFixture('fixtures/events/pull_request.opened.json')
 
-const WORKSPACE_ID = '1000'
+const PROJECT_ID = '2000'
 
 describe('Asana rate limiting (429)', () => {
   it('retries a rate-limited request and completes the run', async () => {
     // retryAfter: '0' keeps the test's real wait time near-zero while still
     // exercising the header-driven delay path.
     const {failed, succeeded} = mockCustomFieldsRateLimitedOnce(
-      WORKSPACE_ID,
+      PROJECT_ID,
       CUSTOM_FIELDS,
       {retryAfter: '0'}
     )
@@ -44,7 +44,7 @@ describe('Asana rate limiting (429)', () => {
   })
 
   it('fails the run when every retry is also rate-limited', async () => {
-    const urlPath = `/api/1.0/workspaces/${WORKSPACE_ID}/custom_fields`
+    const urlPath = `/api/1.0/projects/${PROJECT_ID}/custom_field_settings`
     const alwaysLimited = nock('https://app.asana.com')
       .get(urlPath)
       .query(true)

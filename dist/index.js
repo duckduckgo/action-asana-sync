@@ -113,6 +113,160 @@ exports.installAsanaRateLimitBackoff = installAsanaRateLimitBackoff;
 
 /***/ }),
 
+/***/ 40869:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __await = (this && this.__await) || function (v) { return this instanceof __await ? (this.v = v, this) : new __await(v); }
+var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _arguments, generator) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var g = generator.apply(thisArg, _arguments || []), i, q = [];
+    return i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i;
+    function verb(n) { if (g[n]) i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; }
+    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
+    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
+    function fulfill(value) { resume("next", value); }
+    function reject(value) { resume("throw", value); }
+    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
+};
+var __asyncValues = (this && this.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.findCustomFields = void 0;
+const core_1 = __nccwpck_require__(42186);
+const asana_1 = __nccwpck_require__(30576);
+const CUSTOM_FIELD_NAMES = {
+    url: 'Github URL',
+    status: 'Github Status'
+};
+const customFieldSettingsApi = new asana_1.CustomFieldSettingsApi();
+const customFieldsApi = new asana_1.CustomFieldsApi();
+/**
+ * Lazily yields items across every page of an Asana Collection, fetching
+ * each page only once the consumer asks for more of it - so a consumer that
+ * finds what it needs partway through never pays for the remaining pages.
+ */
+function iteratePages(firstPage) {
+    return __asyncGenerator(this, arguments, function* iteratePages_1() {
+        let page = yield __await(firstPage);
+        while (page.data) {
+            for (const item of page.data) {
+                yield yield __await(item);
+            }
+            page = yield __await(page.nextPage());
+        }
+    });
+}
+/** Scans `items` for the two named custom fields, stopping as soon as both are found. */
+function findNamedFields(items, fieldOf) {
+    var _a, items_1, items_1_1;
+    var _b, e_1, _c, _d;
+    return __awaiter(this, void 0, void 0, function* () {
+        const found = {};
+        try {
+            for (_a = true, items_1 = __asyncValues(items); items_1_1 = yield items_1.next(), _b = items_1_1.done, !_b;) {
+                _d = items_1_1.value;
+                _a = false;
+                try {
+                    const item = _d;
+                    const field = fieldOf(item);
+                    if (field.name === CUSTOM_FIELD_NAMES.url) {
+                        found.url = field;
+                    }
+                    else if (field.name === CUSTOM_FIELD_NAMES.status) {
+                        found.status = field;
+                    }
+                    if (found.url && found.status) {
+                        break;
+                    }
+                }
+                finally {
+                    _a = true;
+                }
+            }
+        }
+        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+        finally {
+            try {
+                if (!_a && !_b && (_c = items_1.return)) yield _c.call(items_1);
+            }
+            finally { if (e_1) throw e_1.error; }
+        }
+        return found;
+    });
+}
+/**
+ * Looks for the custom fields attached to the destination project, rather
+ * than every custom field in the whole workspace: a workspace can have
+ * hundreds of fields spread across many teams, so paging through all of
+ * them just to find these two by name is a needlessly expensive call to
+ * make on every PR event, and one that's easy to rate-limit.
+ */
+function findCustomFieldsInProject(projectGid) {
+    const settings = iteratePages(customFieldSettingsApi.getCustomFieldSettingsForProject(projectGid, {
+        limit: 100,
+        opt_fields: 'custom_field.name,custom_field.enum_options'
+    }));
+    return findNamedFields(settings, setting => setting.custom_field);
+}
+/**
+ * Falls back to every custom field in the whole workspace, for the case
+ * where "Github URL"/"Github Status" exist but were never attached to the
+ * destination project's own custom field settings. Only tried once the
+ * cheap project-scoped lookup above has come up short, since this can page
+ * through hundreds of fields unrelated to this project.
+ */
+function findCustomFieldsInWorkspace(workspaceGid) {
+    const fields = iteratePages(customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, { limit: 100 }));
+    return findNamedFields(fields, field => field);
+}
+function findCustomFields(projectGid, workspaceGid) {
+    return __awaiter(this, void 0, void 0, function* () {
+        let { url: githubUrlField, status: githubStatusField } = yield findCustomFieldsInProject(projectGid);
+        if (!githubUrlField || !githubStatusField) {
+            (0, core_1.info)(`${CUSTOM_FIELD_NAMES.url}/${CUSTOM_FIELD_NAMES.status} not both found ` +
+                `on the project's own custom fields. Falling back to a workspace-wide scan`);
+            const fromWorkspace = yield findCustomFieldsInWorkspace(workspaceGid);
+            githubUrlField = githubUrlField || fromWorkspace.url;
+            githubStatusField = githubStatusField || fromWorkspace.status;
+        }
+        if (!githubUrlField || !githubStatusField) {
+            (0, core_1.debug)(`Still missing after the workspace-wide scan: ${[
+                !githubUrlField && CUSTOM_FIELD_NAMES.url,
+                !githubStatusField && CUSTOM_FIELD_NAMES.status
+            ]
+                .filter(Boolean)
+                .join(', ')}`);
+            throw new Error('Custom fields are missing. Please create them');
+        }
+        (0, core_1.debug)(`${CUSTOM_FIELD_NAMES.url} field GID: ${githubUrlField.gid}`);
+        (0, core_1.debug)(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField.gid}`);
+        return {
+            url: githubUrlField,
+            status: githubStatusField
+        };
+    });
+}
+exports.findCustomFields = findCustomFields;
+
+
+/***/ }),
+
 /***/ 3109:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -134,13 +288,10 @@ const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
 const asana_retry_1 = __nccwpck_require__(66513);
 const approvals_1 = __nccwpck_require__(35238);
+const custom_fields_1 = __nccwpck_require__(40869);
 const markdown_1 = __nccwpck_require__(15821);
 const reviewers_1 = __nccwpck_require__(40512);
 const user_map_1 = __nccwpck_require__(21757);
-const CUSTOM_FIELD_NAMES = {
-    url: 'Github URL',
-    status: 'Github Status'
-};
 asana_1.ApiClient.instance.authentications.token.accessToken = (0, core_1.getInput)('ASANA_ACCESS_TOKEN', { required: true });
 asana_1.ApiClient.instance.defaultHeaders = {
     'asana-enable': 'new_user_task_lists,new_project_templates,new_goal_memberships'
@@ -149,7 +300,6 @@ asana_1.ApiClient.instance.defaultHeaders = {
 // single retry-on-429 wrapper here covers all of them.
 (0, asana_retry_1.installAsanaRateLimitBackoff)();
 exports.tasksApi = new asana_1.TasksApi();
-const customFieldsApi = new asana_1.CustomFieldsApi();
 const sectionsApi = new asana_1.SectionsApi();
 const ASANA_WORKSPACE_ID = (0, core_1.getInput)('ASANA_WORKSPACE_ID', { required: true });
 const PROJECT_ID = (0, core_1.getInput)('ASANA_PROJECT_ID', { required: true });
@@ -510,7 +660,7 @@ function run() {
             const htmlUrl = payload.pull_request.html_url;
             (0, core_1.info)(`PR url: ${htmlUrl}`);
             (0, core_1.info)(`Action: ${payload.action}`);
-            const customFields = yield findCustomFields(ASANA_WORKSPACE_ID);
+            const customFields = yield (0, custom_fields_1.findCustomFields)(PROJECT_ID, ASANA_WORKSPACE_ID);
             // PR metadata
             const statusGid = ((_b = (_a = customFields.status.enum_options) === null || _a === void 0 ? void 0 : _a.find(f => f.name === getPRState(payload.pull_request))) === null || _b === void 0 ? void 0 : _b.gid) || '';
             const title = `PR ${payload.repository.name} #${payload.pull_request.number}: ${payload.pull_request.title}`;
@@ -614,38 +764,6 @@ ${truncatedBody}`;
             if (error instanceof Error)
                 (0, core_1.setFailed)(`${error.message}\nStacktrace:\n${error.stack}`);
         }
-    });
-}
-function getAllCustomFieldsForWorkspace(workspaceGid) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const customFields = [];
-        let page = (yield customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {
-            limit: 100
-        }));
-        while (page.data) {
-            customFields.push(...page.data);
-            page = yield page.nextPage();
-        }
-        return customFields;
-    });
-}
-function findCustomFields(workspaceGid) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const customFields = yield getAllCustomFieldsForWorkspace(workspaceGid);
-        const githubUrlField = customFields.find(f => f.name === CUSTOM_FIELD_NAMES.url);
-        const githubStatusField = customFields.find(f => f.name === CUSTOM_FIELD_NAMES.status);
-        if (!githubUrlField || !githubStatusField) {
-            (0, core_1.debug)(JSON.stringify(customFields));
-            throw new Error('Custom fields are missing. Please create them');
-        }
-        else {
-            (0, core_1.debug)(`${CUSTOM_FIELD_NAMES.url} field GID: ${githubUrlField === null || githubUrlField === void 0 ? void 0 : githubUrlField.gid}`);
-            (0, core_1.debug)(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField === null || githubStatusField === void 0 ? void 0 : githubStatusField.gid}`);
-        }
-        return {
-            url: githubUrlField,
-            status: githubStatusField
-        };
     });
 }
 function getPRState(pr) {

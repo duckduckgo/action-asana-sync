@@ -1,7 +1,7 @@
 import nock from 'nock'
 
 import {makeSubtask, makeTask} from '../fixtures/asana/factories'
-import {WORKSPACE_ID} from './harness'
+import {PROJECT_ID, WORKSPACE_ID} from './harness'
 
 // The `asana` client (npm package) talks plain REST+JSON to this base URL
 // via `superagent`, which rides on Node's core http/https modules -- so
@@ -27,7 +27,28 @@ function mockGet(urlPath: string, data: unknown): nock.Scope {
   return scope().get(urlPath).query(true).reply(200, {data})
 }
 
+/** Wraps a compact custom field as the `custom_field_settings` shape that
+ * `GET /projects/{project_gid}/custom_field_settings` returns it in. */
+function asCustomFieldSetting(field: unknown): unknown {
+  return {custom_field: field}
+}
+
 export function mockCustomFields(
+  projectGid: string,
+  fields: unknown[]
+): nock.Scope {
+  return mockGet(
+    `${API}/projects/${projectGid}/custom_field_settings`,
+    fields.map(asCustomFieldSetting)
+  )
+}
+
+/**
+ * Mocks the workspace-wide custom fields listing that findCustomFields()
+ * falls back to when the project-scoped lookup above doesn't turn up both
+ * required fields.
+ */
+export function mockWorkspaceCustomFields(
   workspaceGid: string,
   fields: unknown[]
 ): nock.Scope {
@@ -35,38 +56,41 @@ export function mockCustomFields(
 }
 
 /**
- * Mocks a single page of the (offset-paginated) custom fields listing.
- * Pass `nextOffset` to indicate more pages follow, and `offset` to match
- * the request that asks for this specific page.
+ * Mocks a single page of the (offset-paginated) custom field settings
+ * listing for a project. Pass `nextOffset` to indicate more pages follow,
+ * and `offset` to match the request that asks for this specific page.
  */
 export function mockCustomFieldsPage(
-  workspaceGid: string,
+  projectGid: string,
   fields: unknown[],
   {offset, nextOffset}: {offset?: string; nextOffset?: string} = {}
 ): nock.Scope {
-  const query: Record<string, string> = {limit: '100'}
+  const query: Record<string, string> = {
+    limit: '100',
+    opt_fields: 'custom_field.name,custom_field.enum_options'
+  }
   if (offset) query.offset = offset
   return scope()
-    .get(`${API}/workspaces/${workspaceGid}/custom_fields`)
+    .get(`${API}/projects/${projectGid}/custom_field_settings`)
     .query(query)
     .reply(200, {
-      data: fields,
+      data: fields.map(asCustomFieldSetting),
       next_page: nextOffset ? {offset: nextOffset} : null
     })
 }
 
 /**
- * Mocks the workspace custom-fields endpoint failing once with a 429 and
- * succeeding on the retry, to exercise the rate-limit backoff wrapper
+ * Mocks the project custom-field-settings endpoint failing once with a 429
+ * and succeeding on the retry, to exercise the rate-limit backoff wrapper
  * end-to-end. `retryAfter`, if given, is sent back as the `Retry-After`
  * header (seconds); pass `'0'` to keep the test's actual wait time near-zero.
  */
 export function mockCustomFieldsRateLimitedOnce(
-  workspaceGid: string,
+  projectGid: string,
   fields: unknown[],
   {retryAfter}: {retryAfter?: string} = {}
 ): {failed: nock.Scope; succeeded: nock.Scope} {
-  const urlPath = `${API}/workspaces/${workspaceGid}/custom_fields`
+  const urlPath = `${API}/projects/${projectGid}/custom_field_settings`
   const failed = scope()
     .get(urlPath)
     .query(true)
@@ -75,7 +99,10 @@ export function mockCustomFieldsRateLimitedOnce(
       {errors: [{message: 'Too Many Requests'}]},
       retryAfter ? {'Retry-After': retryAfter} : undefined
     )
-  const succeeded = scope().get(urlPath).query(true).reply(200, {data: fields})
+  const succeeded = scope()
+    .get(urlPath)
+    .query(true)
+    .reply(200, {data: fields.map(asCustomFieldSetting)})
   return {failed, succeeded}
 }
 
@@ -162,7 +189,7 @@ export function mockPRTaskLookup(
   customFields: unknown[],
   updateMatcher: (data: JSONBody) => boolean = () => true
 ): nock.Scope {
-  mockCustomFields(WORKSPACE_ID, customFields)
+  mockCustomFields(PROJECT_ID, customFields)
   mockSearchTasksInWorkspace(WORKSPACE_ID, [makeTask({gid: taskGid})])
   return mockUpdateTask(taskGid, updateMatcher)
 }
