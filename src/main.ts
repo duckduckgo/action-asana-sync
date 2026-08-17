@@ -1,10 +1,4 @@
-import {
-  ApiClient,
-  CustomFieldsApi,
-  CustomFieldSettingsApi,
-  SectionsApi,
-  TasksApi
-} from 'asana'
+import {ApiClient, SectionsApi, TasksApi} from 'asana'
 import {info, setFailed, getInput, debug, setOutput} from '@actions/core'
 import {context} from '@actions/github'
 import {
@@ -16,25 +10,15 @@ import {
 
 import {installAsanaRateLimitBackoff} from './asana-retry'
 import {outcomeForReview, ReviewOutcome} from './approvals'
+import {findCustomFields, PRFields} from './custom-fields'
 import {renderMD} from './markdown'
 import {getReviewerLogins} from './reviewers'
 import {getUserFromLogin} from './user-map'
 
-const CUSTOM_FIELD_NAMES = {
-  url: 'Github URL',
-  status: 'Github Status'
-}
-
 type PRState = 'Open' | 'Closed' | 'Merged' | 'Approved' | 'Draft'
 
 // The `asana` package's published types are untyped (`any`) throughout, so we
-// declare narrow shapes here for the fields this action actually reads/writes.
-interface AsanaCustomField {
-  gid: string
-  name: string
-  enum_options?: Array<{gid: string; name: string}>
-}
-
+// declare a narrow shape here for the fields this action actually reads/writes.
 interface AsanaTask {
   gid: string
   permalink_url: string
@@ -50,11 +34,6 @@ interface AsanaTask {
   custom_fields: Array<{gid: string; display_value: string}>
 }
 
-type PRFields = {
-  url: AsanaCustomField
-  status: AsanaCustomField
-}
-
 ApiClient.instance.authentications.token.accessToken = getInput(
   'ASANA_ACCESS_TOKEN',
   {required: true}
@@ -67,8 +46,6 @@ ApiClient.instance.defaultHeaders = {
 // single retry-on-429 wrapper here covers all of them.
 installAsanaRateLimitBackoff()
 export const tasksApi = new TasksApi()
-const customFieldSettingsApi = new CustomFieldSettingsApi()
-const customFieldsApi = new CustomFieldsApi()
 const sectionsApi = new SectionsApi()
 const ASANA_WORKSPACE_ID = getInput('ASANA_WORKSPACE_ID', {required: true})
 const PROJECT_ID = getInput('ASANA_PROJECT_ID', {required: true})
@@ -631,117 +608,6 @@ ${truncatedBody}`
   } catch (error) {
     if (error instanceof Error)
       setFailed(`${error.message}\nStacktrace:\n${error.stack}`)
-  }
-}
-
-// The asana client's `Collection` wrapper (returned because
-// `ApiClient.instance.RETURN_COLLECTION` defaults to true) exposes `.data`
-// for the current page and a `.nextPage()` method that resolves to the next
-// `Collection`, or to `{data: null}` once there are no more pages.
-interface AsanaCollectionPage<T> {
-  data: T[] | null
-  nextPage(): Promise<AsanaCollectionPage<T>>
-}
-
-interface AsanaCustomFieldSetting {
-  custom_field: AsanaCustomField
-}
-
-/** Collects every page of an Asana Collection into a single array. */
-async function collectAllPages<T>(
-  firstPage: Promise<AsanaCollectionPage<T>> | AsanaCollectionPage<T>
-): Promise<T[]> {
-  const items: T[] = []
-  let page = await firstPage
-  while (page.data) {
-    items.push(...page.data)
-    page = await page.nextPage()
-  }
-  return items
-}
-
-/**
- * Lists the custom fields attached to the destination project, rather than
- * every custom field in the whole workspace: a workspace can have hundreds of
- * fields spread across many teams, so paging through all of them just to
- * find these two by name is a needlessly expensive call to make on every PR
- * event, and one that's easy to rate-limit.
- */
-async function getCustomFieldsForProject(
-  projectGid: string
-): Promise<AsanaCustomField[]> {
-  const settings = await collectAllPages<AsanaCustomFieldSetting>(
-    customFieldSettingsApi.getCustomFieldSettingsForProject(projectGid, {
-      limit: 100,
-      opt_fields: 'custom_field.name,custom_field.enum_options'
-    })
-  )
-  return settings.map(setting => setting.custom_field)
-}
-
-/**
- * Falls back to every custom field in the whole workspace, for the case
- * where "Github URL"/"Github Status" exist but were never attached to the
- * destination project's own custom field settings. Only tried once the
- * cheap project-scoped lookup above has come up short, since this can page
- * through hundreds of fields unrelated to this project.
- */
-async function getAllCustomFieldsForWorkspace(
-  workspaceGid: string
-): Promise<AsanaCustomField[]> {
-  return collectAllPages<AsanaCustomField>(
-    customFieldsApi.getCustomFieldsForWorkspace(workspaceGid, {limit: 100})
-  )
-}
-
-interface FoundCustomFields {
-  url?: AsanaCustomField
-  status?: AsanaCustomField
-}
-
-function pickCustomFields(customFields: AsanaCustomField[]): FoundCustomFields {
-  return {
-    url: customFields.find(f => f.name === CUSTOM_FIELD_NAMES.url),
-    status: customFields.find(f => f.name === CUSTOM_FIELD_NAMES.status)
-  }
-}
-
-async function findCustomFields(
-  projectGid: string,
-  workspaceGid: string
-): Promise<PRFields> {
-  let {url: githubUrlField, status: githubStatusField} = pickCustomFields(
-    await getCustomFieldsForProject(projectGid)
-  )
-
-  if (!githubUrlField || !githubStatusField) {
-    info(
-      `${CUSTOM_FIELD_NAMES.url}/${CUSTOM_FIELD_NAMES.status} not both found ` +
-        `on the project's own custom fields. Falling back to a workspace-wide scan`
-    )
-    const fromWorkspace = pickCustomFields(
-      await getAllCustomFieldsForWorkspace(workspaceGid)
-    )
-    githubUrlField = githubUrlField || fromWorkspace.url
-    githubStatusField = githubStatusField || fromWorkspace.status
-  }
-
-  if (!githubUrlField || !githubStatusField) {
-    debug(
-      `Still missing after the workspace-wide scan: ${[
-        !githubUrlField && CUSTOM_FIELD_NAMES.url,
-        !githubStatusField && CUSTOM_FIELD_NAMES.status
-      ]
-        .filter(Boolean)
-        .join(', ')}`
-    )
-    throw new Error('Custom fields are missing. Please create them')
-  }
-  debug(`${CUSTOM_FIELD_NAMES.url} field GID: ${githubUrlField.gid}`)
-  debug(`${CUSTOM_FIELD_NAMES.status} field GID: ${githubStatusField.gid}`)
-  return {
-    url: githubUrlField,
-    status: githubStatusField
   }
 }
 

@@ -176,6 +176,37 @@ describe('new pull request (opened)', () => {
     expect(createScope.isDone()).toBe(true)
   })
 
+  it('stops paginating once both required fields are found, without fetching later pages', async () => {
+    // Both target fields are already on page 1 (mixed in with unrelated
+    // fields), which also indicates a page 2 exists. A lazy scan has no
+    // reason to ever ask for it.
+    mockCustomFieldsPage(
+      PROJECT_ID,
+      [...CUSTOM_FIELDS, {gid: '999', name: 'Unrelated'}],
+      {
+        nextOffset: 'page-2-token'
+      }
+    )
+    const page2Scope = mockCustomFieldsPage(PROJECT_ID, [], {
+      offset: 'page-2-token'
+    })
+    mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
+    const createdTask = makeTask({gid: '5010'})
+    const createScope = mockCreateTask(() => true, createdTask)
+    mockSubtasks('5010', [])
+    mockUpdateTask('5010', () => true)
+
+    const {setFailed, setOutput} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'created')
+    expect(createScope.isDone()).toBe(true)
+    expect(page2Scope.isDone()).toBe(false)
+  })
+
   it('falls back to a workspace-wide scan when a required field is missing from the project', async () => {
     // The project's own custom field settings are missing "Github Status"
     // (e.g. it was never attached there), but it still exists somewhere in
