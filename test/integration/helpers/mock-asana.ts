@@ -55,6 +55,30 @@ export function mockCustomFieldsPage(
     })
 }
 
+/**
+ * Mocks the workspace custom-fields endpoint failing once with a 429 and
+ * succeeding on the retry, to exercise the rate-limit backoff wrapper
+ * end-to-end. `retryAfter`, if given, is sent back as the `Retry-After`
+ * header (seconds); pass `'0'` to keep the test's actual wait time near-zero.
+ */
+export function mockCustomFieldsRateLimitedOnce(
+  workspaceGid: string,
+  fields: unknown[],
+  {retryAfter}: {retryAfter?: string} = {}
+): {failed: nock.Scope; succeeded: nock.Scope} {
+  const urlPath = `${API}/workspaces/${workspaceGid}/custom_fields`
+  const failed = scope()
+    .get(urlPath)
+    .query(true)
+    .reply(
+      429,
+      {errors: [{message: 'Too Many Requests'}]},
+      retryAfter ? {'Retry-After': retryAfter} : undefined
+    )
+  const succeeded = scope().get(urlPath).query(true).reply(200, {data: fields})
+  return {failed, succeeded}
+}
+
 export function mockSearchTasksInWorkspace(
   workspaceGid: string,
   tasks: unknown[]
