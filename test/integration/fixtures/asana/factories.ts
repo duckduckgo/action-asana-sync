@@ -13,14 +13,6 @@ export function makeTask(overrides: Overrides): Overrides {
   }
 }
 
-export function makeUser(overrides: Overrides): Overrides {
-  return {
-    email: 'user@example.com',
-    name: 'A User',
-    ...overrides
-  }
-}
-
 // Defaults to a plain task: an approval subtask only exists where a test (or
 // the action, with REVIEW_TASKS_AS_APPROVALS on) has created one.
 export function makeSubtask(overrides: Overrides): Overrides {

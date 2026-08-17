@@ -1,10 +1,4 @@
-import {
-  ApiClient,
-  CustomFieldsApi,
-  SectionsApi,
-  TasksApi,
-  UsersApi
-} from 'asana'
+import {ApiClient, CustomFieldsApi, SectionsApi, TasksApi} from 'asana'
 import {info, setFailed, getInput, debug, setOutput} from '@actions/core'
 import {context} from '@actions/github'
 import {
@@ -43,7 +37,9 @@ interface AsanaTask {
   // Asana's compact task representation, so it comes back from subtask
   // listings, but request it via opt_fields where the value is load-bearing.
   resource_subtype?: string
-  assignee?: {gid: string} | null
+  // `email` isn't part of the default compact assignee representation, so it
+  // only comes back where opt_fields asks for `assignee.email` explicitly.
+  assignee?: {gid: string; email?: string} | null
   memberships: Array<{project: {gid: string}}>
   custom_fields: Array<{gid: string; display_value: string}>
 }
@@ -65,7 +61,6 @@ ApiClient.instance.defaultHeaders = {
 // single retry-on-429 wrapper here covers all of them.
 installAsanaRateLimitBackoff()
 export const tasksApi = new TasksApi()
-const usersApi = new UsersApi()
 const customFieldsApi = new CustomFieldsApi()
 const sectionsApi = new SectionsApi()
 const ASANA_WORKSPACE_ID = getInput('ASANA_WORKSPACE_ID', {required: true})
@@ -187,30 +182,26 @@ async function resolveReviewer(reviewer: string): Promise<string | undefined> {
   return reviewerGidOrEmail
 }
 
-/** Finds the subtask assigned to the given Asana user, if there is one. */
-async function findSubtaskForAssignee(
+/**
+ * Finds the subtask assigned to the given Asana user, if there is one.
+ * Relies on the caller having fetched `assignee` (and `assignee.email`) up
+ * front via opt_fields on the subtask listing - the assignee a subtask
+ * search would otherwise need a `getTask` and a `getUser` call per subtask
+ * to learn.
+ */
+function findSubtaskForAssignee(
   subtasks: AsanaTask[],
   assigneeGidOrEmail: string
-): Promise<AsanaTask | undefined> {
-  for (let subtask of subtasks) {
-    info(`Checking subtask ${subtask.gid} assignee`)
-    subtask = (await tasksApi.getTask(subtask.gid)).data
-    if (!subtask.assignee) {
-      info(`Task ${subtask.gid} has no assignee`)
-      continue
-    }
-    const asanaUser = (await usersApi.getUser(subtask.assignee.gid)).data
-    if (
-      asanaUser.email === assigneeGidOrEmail ||
-      asanaUser.gid === assigneeGidOrEmail
-    ) {
-      info(
-        `Found existing review task for ${subtask.gid} and ${asanaUser.email}`
-      )
-      return subtask
-    }
+): AsanaTask | undefined {
+  const subtask = subtasks.find(
+    s =>
+      s.assignee?.gid === assigneeGidOrEmail ||
+      s.assignee?.email === assigneeGidOrEmail
+  )
+  if (subtask) {
+    info(`Found existing review task ${subtask.gid} for ${assigneeGidOrEmail}`)
   }
-  return undefined
+  return subtask
 }
 
 export async function createOrReopenReviewSubtask(
@@ -228,7 +219,7 @@ export async function createOrReopenReviewSubtask(
     return null
   }
 
-  let reviewSubtask = await findSubtaskForAssignee(subtasks, reviewerGidOrEmail)
+  let reviewSubtask = findSubtaskForAssignee(subtasks, reviewerGidOrEmail)
   info(`Subtask for ${reviewer}: ${JSON.stringify(reviewSubtask)}`)
   const taskFollowers = [reviewerGidOrEmail]
   if (
@@ -283,11 +274,14 @@ See parent task for more information</body>`
 async function updateReviewSubTasks(taskId: string): Promise<void> {
   info(`Creating/updating review subtasks for task ${taskId}`)
   const payload = context.payload as PullRequestEvent
-  // resource_subtype and completed are what decide whether a subtask can record
-  // a given outcome, so read them with the listing rather than per subtask.
+  // resource_subtype and completed are what decide whether a subtask can
+  // record a given outcome, and assignee/assignee.email are what
+  // findSubtaskForAssignee() matches a reviewer against - reading all of
+  // them with the listing avoids a getTask+getUser call per subtask to look
+  // each one up individually.
   const subtasks = (
     await tasksApi.getSubtasksForTask(taskId, {
-      opt_fields: 'resource_subtype,completed'
+      opt_fields: 'resource_subtype,completed,assignee,assignee.email'
     })
   ).data as AsanaTask[]
   if (
@@ -347,7 +341,7 @@ async function updateReviewSubTasks(taskId: string): Promise<void> {
       if (!reviewerGidOrEmail) {
         return
       }
-      const subtask = await findSubtaskForAssignee(
+      const subtask = findSubtaskForAssignee(
         decidedApprovals,
         reviewerGidOrEmail
       )
