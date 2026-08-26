@@ -512,35 +512,40 @@ ${truncatedBody}`
     // Rich-text notes with some custom "fixes" for Asana to render things
     const htmlNotes = `<body>${renderMD(notes)}</body>`
 
-    let task
-    if (['opened'].includes(payload.action)) {
-      task = await createPRTask(title, notes, statusGid, customFields)
-      setOutput('result', 'created')
-    } else {
-      const maxRetries = 3 + Math.floor(Math.random() * 5) // 3-8 retries
-      let retries = 0
+    // Every path looks for an existing task before creating one: `opened` is
+    // no guarantee of newness, because GitHub delivers a new PR's events
+    // (`opened`, `review_requested`, bot `edited`s) in no particular order, so
+    // another event's run may have synced the PR first. The `opened` run may
+    // even never exist: a PR opened with the workflow's own GITHUB_TOKEN
+    // doesn't trigger workflows at all.
+    let task = await findPRTask(customFields)
 
-      while (retries < maxRetries) {
-        // Wait for PR to appear
-        task = await findPRTask(customFields)
-        if (task) {
-          setOutput('result', 'updated')
-          break
-        }
+    // For any other event, an absent task usually means the `opened` run is
+    // still creating it, so wait for it to appear. The give-up deadline is
+    // jittered over a wide continuous range so parallel waiters almost never
+    // give up (and each create a task) together, and every look comes right
+    // after a sleep, so the loop never gives up on a stale one.
+    if (!task && payload.action !== 'opened') {
+      const deadline = Date.now() + 60000 + Math.random() * 180000
+      while (!task && Date.now() < deadline) {
         info(`PR task not found yet. Sleeping...`)
         await new Promise(resolve =>
           setTimeout(resolve, 20000 + Math.floor(Math.random() * 10000))
-        ) // 20-30s wait time
-        retries++
+        ) // 20-30s between looks
+        task = await findPRTask(customFields)
       }
-
       if (!task) {
         info(
           `Waited a long time and no task appeared. Assuming old PR and creating a new task.`
         )
-        task = await createPRTask(title, notes, statusGid, customFields)
-        setOutput('result', 'created')
       }
+    }
+
+    if (task) {
+      setOutput('result', 'updated')
+    } else {
+      task = await createPRTask(title, notes, statusGid, customFields)
+      setOutput('result', 'created')
     }
 
     setOutput('task_url', task.permalink_url)

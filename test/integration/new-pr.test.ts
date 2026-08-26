@@ -4,8 +4,11 @@ import {
   mockCustomFieldsPage,
   mockWorkspaceCustomFields,
   mockCreateTask,
+  mockCreateTaskNeverCalled,
   mockFindTaskById,
   mockFindTaskByIdFails,
+  mockPRTaskLookup,
+  mockPRTaskNotFound,
   mockSubtasks,
   mockUpdateTask,
   mockUpdateTaskFails
@@ -22,6 +25,7 @@ const PROJECT_ID = '2000'
 describe('new pull request (opened)', () => {
   it('creates a task, links the Asana task mentioned in the body as parent, and reports created', async () => {
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({
       gid: '5000',
@@ -60,6 +64,7 @@ describe('new pull request (opened)', () => {
 
   it('omits the parent link when the referenced Asana task cannot be accessed', async () => {
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskByIdFails('9876543210', 404)
     const createdTask = makeTask({gid: '5001'})
     const createScope = mockCreateTask(data => {
@@ -80,6 +85,7 @@ describe('new pull request (opened)', () => {
 
   it('does not assign the task when ASSIGN_PR_AUTHOR is false', async () => {
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createScope = mockCreateTask(
       data => {
@@ -102,6 +108,7 @@ describe('new pull request (opened)', () => {
 
   it('assigns the task to the mapped Asana user when ASSIGN_PR_AUTHOR is true', async () => {
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createScope = mockCreateTask(
       data => {
@@ -127,6 +134,7 @@ describe('new pull request (opened)', () => {
 
   it('falls back to plaintext notes when updating with html_notes fails', async () => {
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     mockCreateTask(() => true, makeTask({gid: '5004'}))
     mockSubtasks('5004', [])
@@ -160,6 +168,7 @@ describe('new pull request (opened)', () => {
     mockCustomFieldsPage(PROJECT_ID, CUSTOM_FIELDS, {
       offset: 'page-2-token'
     })
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({gid: '5005'})
     const createScope = mockCreateTask(() => true, createdTask)
@@ -190,6 +199,7 @@ describe('new pull request (opened)', () => {
     const page2Scope = mockCustomFieldsPage(PROJECT_ID, [], {
       offset: 'page-2-token'
     })
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({gid: '5010'})
     const createScope = mockCreateTask(() => true, createdTask)
@@ -213,6 +223,7 @@ describe('new pull request (opened)', () => {
     // the workspace.
     mockCustomFields(PROJECT_ID, [{gid: '111', name: 'Github URL'}])
     mockWorkspaceCustomFields(WORKSPACE_ID, CUSTOM_FIELDS)
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({gid: '5006'})
     const createScope = mockCreateTask(() => true, createdTask)
@@ -247,5 +258,23 @@ describe('new pull request (opened)', () => {
     expect(setFailed).toHaveBeenCalledTimes(1)
     expect(setFailed.mock.calls[0][0]).toContain('Custom fields are missing')
     expect(setOutput).not.toHaveBeenCalled()
+  })
+
+  it('updates the existing task instead of creating one when another run got there first', async () => {
+    // Another event's run (or one queued ahead by a concurrency group) may
+    // already have created the task by the time `opened` executes.
+    const updateScope = mockPRTaskLookup('6100', CUSTOM_FIELDS)
+    mockSubtasks('6100', [])
+    const createScope = mockCreateTaskNeverCalled()
+
+    const {setOutput, setFailed} = await runAction({
+      eventName: 'pull_request',
+      payload: OPENED_EVENT
+    })
+
+    expect(setFailed).not.toHaveBeenCalled()
+    expect(setOutput).toHaveBeenCalledWith('result', 'updated')
+    expect(updateScope.isDone()).toBe(true)
+    expect(createScope.isDone()).toBe(false)
   })
 })

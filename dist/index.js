@@ -679,30 +679,35 @@ ${preamble}
 ${truncatedBody}`;
             // Rich-text notes with some custom "fixes" for Asana to render things
             const htmlNotes = `<body>${(0, markdown_1.renderMD)(notes)}</body>`;
-            let task;
-            if (['opened'].includes(payload.action)) {
-                task = yield createPRTask(title, notes, statusGid, customFields);
-                (0, core_1.setOutput)('result', 'created');
-            }
-            else {
-                const maxRetries = 3 + Math.floor(Math.random() * 5); // 3-8 retries
-                let retries = 0;
-                while (retries < maxRetries) {
-                    // Wait for PR to appear
-                    task = yield findPRTask(customFields);
-                    if (task) {
-                        (0, core_1.setOutput)('result', 'updated');
-                        break;
-                    }
+            // Every path looks for an existing task before creating one: `opened` is
+            // no guarantee of newness, because GitHub delivers a new PR's events
+            // (`opened`, `review_requested`, bot `edited`s) in no particular order, so
+            // another event's run may have synced the PR first. The `opened` run may
+            // even never exist: a PR opened with the workflow's own GITHUB_TOKEN
+            // doesn't trigger workflows at all.
+            let task = yield findPRTask(customFields);
+            // For any other event, an absent task usually means the `opened` run is
+            // still creating it, so wait for it to appear. The give-up deadline is
+            // jittered over a wide continuous range so parallel waiters almost never
+            // give up (and each create a task) together, and every look comes right
+            // after a sleep, so the loop never gives up on a stale one.
+            if (!task && payload.action !== 'opened') {
+                const deadline = Date.now() + 60000 + Math.random() * 180000;
+                while (!task && Date.now() < deadline) {
                     (0, core_1.info)(`PR task not found yet. Sleeping...`);
-                    yield new Promise(resolve => setTimeout(resolve, 20000 + Math.floor(Math.random() * 10000))); // 20-30s wait time
-                    retries++;
+                    yield new Promise(resolve => setTimeout(resolve, 20000 + Math.floor(Math.random() * 10000))); // 20-30s between looks
+                    task = yield findPRTask(customFields);
                 }
                 if (!task) {
                     (0, core_1.info)(`Waited a long time and no task appeared. Assuming old PR and creating a new task.`);
-                    task = yield createPRTask(title, notes, statusGid, customFields);
-                    (0, core_1.setOutput)('result', 'created');
                 }
+            }
+            if (task) {
+                (0, core_1.setOutput)('result', 'updated');
+            }
+            else {
+                task = yield createPRTask(title, notes, statusGid, customFields);
+                (0, core_1.setOutput)('result', 'created');
             }
             (0, core_1.setOutput)('task_url', task.permalink_url);
             const sectionId = (0, core_1.getInput)('move_to_section_id');
