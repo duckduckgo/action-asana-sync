@@ -522,11 +522,9 @@ ${truncatedBody}`
 
     // For any other event, an absent task usually means the `opened` run is
     // still creating it, so wait for it to appear. The give-up deadline is
-    // jittered over a wide continuous range so that two runs waiting this out
-    // in parallel almost never give up together: the later one's final look -
-    // taken right before the deadline check, so never staler than one create
-    // call - finds the task the earlier one just created, instead of both
-    // runs creating one each.
+    // jittered over a wide continuous range so parallel waiters almost never
+    // give up (and each create a task) together, and every look comes right
+    // after a sleep, so the loop never gives up on a stale one.
     if (!task && payload.action !== 'opened') {
       const deadline = Date.now() + 60000 + Math.random() * 180000
       while (!task && Date.now() < deadline) {
@@ -536,16 +534,16 @@ ${truncatedBody}`
         ) // 20-30s between looks
         task = await findPRTask(customFields)
       }
+      if (!task) {
+        info(
+          `Waited a long time and no task appeared. Assuming old PR and creating a new task.`
+        )
+      }
     }
 
     if (task) {
       setOutput('result', 'updated')
     } else {
-      if (payload.action !== 'opened') {
-        info(
-          `Waited a long time and no task appeared. Assuming old PR and creating a new task.`
-        )
-      }
       task = await createPRTask(title, notes, statusGid, customFields)
       setOutput('result', 'created')
     }

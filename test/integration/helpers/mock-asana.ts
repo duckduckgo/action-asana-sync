@@ -241,3 +241,8 @@ export function mockExistingReviewSubtask(
 export function mockUpdateTaskNeverCalled(taskGid: string): nock.Scope {
   return mockUpdateTask(taskGid, () => true)
 }
+
+/** Like mockUpdateTaskNeverCalled, for a task create that must never happen. */
+export function mockCreateTaskNeverCalled(): nock.Scope {
+  return mockCreateTask(() => true, makeTask({}))
+}

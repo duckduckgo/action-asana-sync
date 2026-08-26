@@ -4,6 +4,8 @@ import {
   mockSearchTasksInWorkspace,
   mockProjectTasks,
   mockCreateTask,
+  mockCreateTaskNeverCalled,
+  mockPRTaskNotFound,
   mockSubtasks,
   mockUpdateTask
 } from './helpers/mock-asana'
@@ -63,17 +65,14 @@ describe('existing pull request updates', () => {
   })
 
   /**
-   * Makes the wait-for-task loop deterministic and instant. Math.random is
-   * pinned to 0 so the jittered give-up deadline (60-240s out) and the delay
-   * between looks (20-30s) take their minimums, and the between-look sleeps
-   * are short-circuited so the waits don't actually take a minute. Only those
-   * delays (20-30s) are short-circuited: the asana client also schedules its
-   * own request-timeout timer via setTimeout, which must run for real so it
-   * can be cleared once nock resolves the (instant) request. Date.now serves
-   * a fake clock that each short-circuited sleep advances by the slept delay,
-   * so the loop's own sleeping is the only thing that moves time: the
-   * deadline lands 60s out and each sleep covers 20s, giving the loop its
-   * initial look plus exactly three more before it crosses the deadline.
+   * Makes the wait-for-task loop deterministic and instant: Math.random is
+   * pinned to 0 (deadline and sleep jitter take their minimums) and the
+   * between-look sleeps are short-circuited. Only those delays (20-30s) are:
+   * the asana client also schedules its own request-timeout timer via
+   * setTimeout, which must run for real so it can be cleared once nock
+   * resolves the (instant) request. Date.now serves a fake clock advanced
+   * only by each short-circuited sleep, so a test's mock count is what
+   * decides how many looks fit before the deadline.
    */
   function pinWaitLoopTimers(): void {
     jest.spyOn(global.Math, 'random').mockReturnValue(0)
@@ -98,8 +97,7 @@ describe('existing pull request updates', () => {
 
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     for (let i = 0; i < 4; i++) {
-      mockSearchTasksInWorkspace(WORKSPACE_ID, [])
-      mockProjectTasks(PROJECT_ID, [])
+      mockPRTaskNotFound()
     }
     const createdTask = makeTask({gid: '6002'})
     const createScope = mockCreateTask(() => true, createdTask)
@@ -120,19 +118,17 @@ describe('existing pull request updates', () => {
     pinWaitLoopTimers()
 
     // The first three looks find nothing; the task shows up on the loop's
-    // last look before the give-up deadline - the parallel-runs race this
-    // ordering simulates is exactly how two tasks get created. An unexpected
-    // create would hit nock's disabled network and fail the run, so setFailed
-    // doubles as the no-create assertion.
+    // last look before the give-up deadline, as it does when a parallel run
+    // creates it while this one waits.
     mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
     for (let i = 0; i < 3; i++) {
-      mockSearchTasksInWorkspace(WORKSPACE_ID, [])
-      mockProjectTasks(PROJECT_ID, [])
+      mockPRTaskNotFound()
     }
     const lateTask = makeTask({gid: '6003'})
     mockSearchTasksInWorkspace(WORKSPACE_ID, [lateTask])
     mockSubtasks('6003', [])
     const updateScope = mockUpdateTask('6003', () => true)
+    const createScope = mockCreateTaskNeverCalled()
 
     const {setOutput, setFailed} = await runAction({
       eventName: 'pull_request',
@@ -142,5 +138,6 @@ describe('existing pull request updates', () => {
     expect(setFailed).not.toHaveBeenCalled()
     expect(setOutput).toHaveBeenCalledWith('result', 'updated')
     expect(updateScope.isDone()).toBe(true)
+    expect(createScope.isDone()).toBe(false)
   })
 })

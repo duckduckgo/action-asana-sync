@@ -4,10 +4,11 @@ import {
   mockCustomFieldsPage,
   mockWorkspaceCustomFields,
   mockCreateTask,
+  mockCreateTaskNeverCalled,
   mockFindTaskById,
   mockFindTaskByIdFails,
+  mockPRTaskLookup,
   mockPRTaskNotFound,
-  mockSearchTasksInWorkspace,
   mockSubtasks,
   mockUpdateTask,
   mockUpdateTaskFails
@@ -260,21 +261,11 @@ describe('new pull request (opened)', () => {
   })
 
   it('updates the existing task instead of creating one when another run got there first', async () => {
-    // GitHub delivers a new PR's events (`opened`, `review_requested`, bot
-    // `edited`s) in no guaranteed order, so by the time the `opened` run
-    // executes - e.g. queued behind another run by a concurrency group -
-    // that other run may already have created the task. `opened` must then
-    // update it, not create a duplicate. An unexpected create would hit
-    // nock's disabled network and fail the run, so setFailed doubles as the
-    // no-create assertion.
-    mockCustomFields(PROJECT_ID, CUSTOM_FIELDS)
-    const existingTask = makeTask({
-      gid: '6100',
-      permalink_url: 'https://app.asana.com/0/2000/6100'
-    })
-    mockSearchTasksInWorkspace(WORKSPACE_ID, [existingTask])
+    // Another event's run (or one queued ahead by a concurrency group) may
+    // already have created the task by the time `opened` executes.
+    const updateScope = mockPRTaskLookup('6100', CUSTOM_FIELDS)
     mockSubtasks('6100', [])
-    const updateScope = mockUpdateTask('6100', () => true)
+    const createScope = mockCreateTaskNeverCalled()
 
     const {setOutput, setFailed} = await runAction({
       eventName: 'pull_request',
@@ -283,10 +274,7 @@ describe('new pull request (opened)', () => {
 
     expect(setFailed).not.toHaveBeenCalled()
     expect(setOutput).toHaveBeenCalledWith('result', 'updated')
-    expect(setOutput).toHaveBeenCalledWith(
-      'task_url',
-      'https://app.asana.com/0/2000/6100'
-    )
     expect(updateScope.isDone()).toBe(true)
+    expect(createScope.isDone()).toBe(false)
   })
 })
