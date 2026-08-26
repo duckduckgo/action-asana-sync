@@ -120,6 +120,17 @@ export function mockProjectTasks(
   return mockGet(`${API}/projects/${projectGid}/tasks`, tasks)
 }
 
+/**
+ * Mocks one find-PR-task round (the workspace search plus the project-listing
+ * fallback it moves on to) coming up empty, as it does for a PR that has no
+ * task yet. Every run starts with such a round, so even an `opened` event
+ * needs one mocked before its create.
+ */
+export function mockPRTaskNotFound(): void {
+  mockSearchTasksInWorkspace(WORKSPACE_ID, [])
+  mockProjectTasks(PROJECT_ID, [])
+}
+
 export function mockCreateTask(
   matcher: (data: JSONBody) => boolean,
   responseTask: unknown

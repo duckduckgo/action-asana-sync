@@ -5,6 +5,7 @@ import {
   mockCustomFieldsRateLimitedOnce,
   mockCreateTask,
   mockFindTaskById,
+  mockPRTaskNotFound,
   mockSubtasks,
   mockUpdateTask
 } from './helpers/mock-asana'
@@ -25,6 +26,7 @@ describe('Asana rate limiting (429)', () => {
       CUSTOM_FIELDS,
       {retryAfter: '0'}
     )
+    mockPRTaskNotFound()
     mockFindTaskById('9876543210', makeTask({gid: '9876543210'}))
     const createdTask = makeTask({gid: '5100'})
     const createScope = mockCreateTask(() => true, createdTask)
