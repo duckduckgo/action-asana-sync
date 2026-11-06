@@ -27,7 +27,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^2.0.3",
+    "@actions/core": "^3.0.1",
     "@actions/github": "^6.0.0",
     "asana": "^3.1.12",
     "markdown-it": "^14.0.0"
