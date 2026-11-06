@@ -9,3 +9,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # @types/node must match the Node runtime the action runs on
+      # (action.yml `runs.using: node24`, .nvmrc). Bump its major by hand
+      # together with the runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]

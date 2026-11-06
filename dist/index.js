@@ -7,7 +7,7 @@ require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.outcomeForReview = void 0;
+exports.outcomeForReview = outcomeForReview;
 /**
  * The outcome a `pull_request_review` event should record for the review's
  * author. An `approved` or `changes_requested` review carries its own verdict;
@@ -32,7 +32,6 @@ function outcomeForReview(action, state) {
             return 'pending';
     }
 }
-exports.outcomeForReview = outcomeForReview;
 
 
 /***/ }),
@@ -52,7 +51,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.installAsanaRateLimitBackoff = void 0;
+exports.installAsanaRateLimitBackoff = installAsanaRateLimitBackoff;
 const asana_1 = __nccwpck_require__(30576);
 const core_1 = __nccwpck_require__(42186);
 const MAX_RETRIES = 5;
@@ -108,7 +107,6 @@ function installAsanaRateLimitBackoff(client = asana_1.ApiClient.instance, wait 
         });
     };
 }
-exports.installAsanaRateLimitBackoff = installAsanaRateLimitBackoff;
 
 
 /***/ }),
@@ -131,8 +129,9 @@ var __await = (this && this.__await) || function (v) { return this instanceof __
 var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _arguments, generator) {
     if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
     var g = generator.apply(thisArg, _arguments || []), i, q = [];
-    return i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i;
-    function verb(n) { if (g[n]) i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; }
+    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
+    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
+    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
     function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
     function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
     function fulfill(value) { resume("next", value); }
@@ -147,7 +146,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.findCustomFields = void 0;
+exports.findCustomFields = findCustomFields;
 const core_1 = __nccwpck_require__(42186);
 const asana_1 = __nccwpck_require__(30576);
 const CUSTOM_FIELD_NAMES = {
@@ -174,29 +173,24 @@ function iteratePages(firstPage) {
 }
 /** Scans `items` for the two named custom fields, stopping as soon as both are found. */
 function findNamedFields(items, fieldOf) {
-    var _a, items_1, items_1_1;
-    var _b, e_1, _c, _d;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, items_1, items_1_1;
+        var _b, e_1, _c, _d;
         const found = {};
         try {
-            for (_a = true, items_1 = __asyncValues(items); items_1_1 = yield items_1.next(), _b = items_1_1.done, !_b;) {
+            for (_a = true, items_1 = __asyncValues(items); items_1_1 = yield items_1.next(), _b = items_1_1.done, !_b; _a = true) {
                 _d = items_1_1.value;
                 _a = false;
-                try {
-                    const item = _d;
-                    const field = fieldOf(item);
-                    if (field.name === CUSTOM_FIELD_NAMES.url) {
-                        found.url = field;
-                    }
-                    else if (field.name === CUSTOM_FIELD_NAMES.status) {
-                        found.status = field;
-                    }
-                    if (found.url && found.status) {
-                        break;
-                    }
+                const item = _d;
+                const field = fieldOf(item);
+                if (field.name === CUSTOM_FIELD_NAMES.url) {
+                    found.url = field;
                 }
-                finally {
-                    _a = true;
+                else if (field.name === CUSTOM_FIELD_NAMES.status) {
+                    found.status = field;
+                }
+                if (found.url && found.status) {
+                    break;
                 }
             }
         }
@@ -262,7 +256,6 @@ function findCustomFields(projectGid, workspaceGid) {
         };
     });
 }
-exports.findCustomFields = findCustomFields;
 
 
 /***/ }),
@@ -282,7 +275,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.done = exports.createOrReopenReviewSubtask = exports.tasksApi = void 0;
+exports.done = exports.tasksApi = void 0;
+exports.createOrReopenReviewSubtask = createOrReopenReviewSubtask;
 const asana_1 = __nccwpck_require__(30576);
 const core_1 = __nccwpck_require__(42186);
 const github_1 = __nccwpck_require__(95438);
@@ -331,8 +325,8 @@ const REVIEW_TASKS_AS_APPROVALS = (0, core_1.getInput)('REVIEW_TASKS_AS_APPROVAL
  * which is what this action has always written.
  */
 function setReviewOutcome(subtask, outcome) {
-    var _a;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const data = subtask.resource_subtype === 'approval'
             ? { approval_status: outcome }
             : { completed: outcome !== 'pending' };
@@ -422,8 +416,8 @@ function findSubtaskForAssignee(subtasks, assigneeGidOrEmail) {
     }
     return subtask;
 }
-function createOrReopenReviewSubtask(taskId, reviewer, subtasks, reopenIfCompleted = true) {
-    return __awaiter(this, void 0, void 0, function* () {
+function createOrReopenReviewSubtask(taskId_1, reviewer_1, subtasks_1) {
+    return __awaiter(this, arguments, void 0, function* (taskId, reviewer, subtasks, reopenIfCompleted = true) {
         const payload = github_1.context.payload;
         const title = payload.pull_request.title;
         const githubAuthor = payload.pull_request.user.login;
@@ -473,7 +467,6 @@ See parent task for more information</body>`;
         return reviewSubtask;
     });
 }
-exports.createOrReopenReviewSubtask = createOrReopenReviewSubtask;
 function updateReviewSubTasks(taskId) {
     return __awaiter(this, void 0, void 0, function* () {
         (0, core_1.info)(`Creating/updating review subtasks for task ${taskId}`);
@@ -642,8 +635,8 @@ function createPRTask(title, notes, prStatus, customFields) {
     });
 }
 function run() {
-    var _a, _b;
     return __awaiter(this, void 0, void 0, function* () {
+        var _a, _b;
         try {
             (0, core_1.debug)(`Event: ${github_1.context.eventName}.`);
             if (!['pull_request', 'pull_request_target', 'pull_request_review'].includes(github_1.context.eventName)) {
@@ -797,7 +790,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.renderMD = void 0;
+exports.renderMD = renderMD;
 // Setup markdown with limited tag support because Asana limits us
 const markdown_it_1 = __importDefault(__nccwpck_require__(36696));
 const md = (0, markdown_it_1.default)('zero', { linkify: true }).enable([
@@ -847,7 +840,6 @@ function renderMD(text) {
         .replace(/<\/pre>/gm, '')
         .replace(/(<li>.*)\n/gm, '$1');
 }
-exports.renderMD = renderMD;
 
 
 /***/ }),
@@ -858,7 +850,7 @@ exports.renderMD = renderMD;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getReviewerLogins = void 0;
+exports.getReviewerLogins = getReviewerLogins;
 /**
  * Logins that should get a review subtask: the union of the PR's assignees and
  * its requested reviewers, minus the author (a self-assigned PR is not a review
@@ -876,7 +868,6 @@ function getReviewerLogins(pr) {
     ];
     return [...new Set(logins)].filter(login => login !== pr.user.login);
 }
-exports.getReviewerLogins = getReviewerLogins;
 
 
 /***/ }),
@@ -899,7 +890,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getUserFromLogin = void 0;
+exports.getUserFromLogin = getUserFromLogin;
 const core_1 = __nccwpck_require__(42186);
 const core_2 = __nccwpck_require__(76762);
 const js_yaml_1 = __importDefault(__nccwpck_require__(21917));
@@ -940,7 +931,6 @@ function getUserFromLogin(login) {
         return USER_MAP[login] || undefined;
     });
 }
-exports.getUserFromLogin = getUserFromLogin;
 
 
 /***/ }),
