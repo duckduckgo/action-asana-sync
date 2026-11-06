@@ -15,3 +15,7 @@ updates:
       # together with the runtime.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # nock 15 is ESM-only, which Jest (CommonJS mode) cannot load without
+      # moving the whole test suite to native ESM. Stay on 14.x until then.
+      - dependency-name: "nock"
+        update-types: ["version-update:semver-major"]
